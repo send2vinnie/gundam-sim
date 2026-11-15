@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Widgets/widgets.css">
-<link rel="stylesheet" href="css/style.css?v=49">
+<link rel="stylesheet" href="css/style.css?v=50">
 <script src="https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Cesium.js"></script>
 </head>
 <body>
@@ -79,6 +79,7 @@
   <div class="hud-bottom">
     <span id="hudMode">HOVER</span> · <span id="hudCam">CHASE CAM</span> · <span id="hudLoc"></span> <span id="hudFps"></span>
   </div>
+  <div id="aimScope" class="aim-scope" aria-hidden="true" hidden><div class="aim-sweep"></div></div>
   <div id="crosshair" class="crosshair" aria-hidden="true"></div>
   <div id="impact" class="impact">IMPACT</div>
   <div id="loadingTiles" class="loading-tiles">Loading city…</div>
@@ -213,6 +214,6 @@
   </form>
 </dialog>
 
-<script src="js/app.js?v=49"></script>
+<script src="js/app.js?v=50"></script>
 </body>
 </html>

@@ -1494,7 +1494,7 @@ void main() {
       }
       const eye = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
       camera.setView({ destination: C.Cartesian3.fromDegrees(eye.lon, eye.lat, fly.h + ch.eye),
-        orientation: { heading: fly.az * DEG + look.yaw, pitch: -Math.min(20 * DEG, fly.lean * 0.5) + look.pitch, roll: fly.bank * 0.5 } });
+        orientation: { heading: fly.az * DEG + look.yaw, pitch: -Math.min(12 * DEG, fly.lean * 0.5) + look.pitch, roll: fly.bank * 0.5 } });
       return;
     }
     // chase / far / side distances suit the character's size
@@ -1661,7 +1661,7 @@ void main() {
   // point at full range). The crosshair is the point on the line from the character's eyes to that target, 5 m ahead of the
   // Gundam's eyes / 1 m ahead of the rider's; the character aims from its eyes through the crosshair to the target. In the
   // cockpit view (where the eyes are the camera) the crosshair lags the movement a little (about 0.15 s): turning, climbing
-  // or sidestepping shifts it off centre and it settles back; the aim goes through the crosshair as drawn.
+  // or diving shifts it off centre and it settles back; the aim goes through the crosshair as drawn.
   const AIM_AHEAD = { gundam: 5, dragon: 1 };
   function aimEye() {   // the eyes as drawn (they move with the body lean and bank)
     const ch = CH();
@@ -1685,15 +1685,7 @@ void main() {
       if (cockpit && fly.aimDir && fly.aimEyePrev && fly.aimCockpit) {
         const k = 1 - Math.exp(-dt / 0.15);
         fly.aimDir = C.Cartesian3.normalize(C.Cartesian3.lerp(fly.aimDir, want, k, new C.Cartesian3()), new C.Cartesian3());
-        // sideways/vertical movement drags the crosshair back a little (not along the line of sight), eased the same way
-        const v = C.Cartesian3.multiplyByScalar(C.Cartesian3.subtract(eye, fly.aimEyePrev, new C.Cartesian3()), 1 / Math.max(dt, 1e-3), new C.Cartesian3());
-        const along = C.Cartesian3.multiplyByScalar(fly.aimDir, C.Cartesian3.dot(v, fly.aimDir), new C.Cartesian3());
-        // (scaled to the crosshair distance, so it is the same angle for both characters; slow drifts such as the hover sink,
-        // under 3 m/s, are ignored so a steady hover keeps it centred)
-        const side = C.Cartesian3.subtract(v, along, new C.Cartesian3()), sp = C.Cartesian3.magnitude(side);
-        const lat = sp > 3 ? C.Cartesian3.multiplyByScalar(side, -0.024 * D * (sp - 3) / sp, new C.Cartesian3()) : new C.Cartesian3();
-        if (C.Cartesian3.magnitude(lat) > 0.3 * D) C.Cartesian3.multiplyByScalar(C.Cartesian3.normalize(lat, lat), 0.3 * D, lat);
-        fly.aimLag = C.Cartesian3.lerp(fly.aimLag || new C.Cartesian3(), lat, k, new C.Cartesian3());
+        fly.aimLag = new C.Cartesian3();   // (a steady flight tilt is no offset: only turning, climbing and diving make it lag)
       } else { fly.aimDir = C.Cartesian3.clone(want); fly.aimLag = new C.Cartesian3(); }
       fly.aimEyePrev = C.Cartesian3.clone(eye); fly.aimCockpit = cockpit;
     }
@@ -1718,7 +1710,27 @@ void main() {
     if (!w) return;
     fly.crosshairXY = [Math.max(16, Math.min(cv.clientWidth - 16, w.x)), Math.max(16, Math.min(cv.clientHeight - 16, w.y))];
     crosshairEl.style.left = fly.crosshairXY[0] + "px"; crosshairEl.style.top = fly.crosshairXY[1] + "px";
+    // cockpit: the aiming scope, a green radar ring around the line of sight (a 3.5 deg radius, sized with the
+    // camera's field of view so it scales with the screen). The crosshair turns red while it is outside the scope (it lags a
+    // fast turn or climb) or while the target is beyond the weapon's reach from where the body faces (the rifle turns 25 deg
+    // to either side, 20 up and 15 down; the dragon's head 35, 30 and 25), e.g. when looking around.
+    const cockpit = CAMS[fly.cam].range === 0;
+    scopeEl.hidden = !cockpit;
+    let out = false;
+    if (cockpit && camera.frustum && camera.frustum.fovy && fly.aimR) {
+      const fpx = (cv.clientHeight / 2) / Math.tan(camera.frustum.fovy / 2), r = fpx * Math.tan(3.5 * DEG), cx = cv.clientWidth / 2, cy = cv.clientHeight / 2;
+      scopeEl.style.left = (cx - r) + "px"; scopeEl.style.top = (cy - r) + "px"; scopeEl.style.width = scopeEl.style.height = 2 * r + "px";
+      const outside = Math.hypot(w.x - cx, w.y - cy) > r;
+      const L = fly.character === "dragon" ? { yaw: D_AIM.yaw, up: D_AIM.up, down: D_AIM.down } : { yaw: 25 * DEG, up: 20 * DEG, down: 15 * DEG };
+      const eye = camera.positionWC, inv = C.Matrix4.inverseTransformation(C.Transforms.eastNorthUpToFixedFrame(eye), new C.Matrix4());
+      const l = C.Matrix4.multiplyByPointAsVector(inv, C.Cartesian3.subtract(fly.aimR, eye, new C.Cartesian3()), new C.Cartesian3());
+      let yo = Math.atan2(l.x, l.y) - fly.az * DEG; yo = Math.atan2(Math.sin(yo), Math.cos(yo));
+      const pt = Math.atan2(l.z, Math.hypot(l.x, l.y)), py = pt >= 0 ? L.up : L.down;
+      out = outside || (yo / L.yaw) ** 2 + (pt / py) ** 2 > 1;
+    }
+    crosshairEl.classList.toggle("out", out); scopeEl.classList.toggle("alert", out); fly.crosshairOut = out;
   }
+  const scopeEl = $("aimScope");
   const crosshairTarget = (gpuOk) => updateAim(gpuOk);
   function requestFire() {
     if (state.mode !== "fly" || !fly.model || fireCooldown > 0) return;
@@ -2278,7 +2290,7 @@ void main() {
   }
 
   // expose for debugging / automated tests
-  window.GFS = { FLIGHT_POSE, aimEye, get aim() { return { eye: aimEye(), R: fly.aimR, T: fly.aimT, xy: fly.crosshairXY }; }, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
+  window.GFS = { FLIGHT_POSE, aimEye, get aim() { return { eye: aimEye(), R: fly.aimR, T: fly.aimT, xy: fly.crosshairXY, out: !!fly.crosshairOut }; }, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
 
   (async () => {
     $("startBtn").disabled = true; $("startBtn").textContent = "Loading…";

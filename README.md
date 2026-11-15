@@ -100,7 +100,7 @@ back within about 300 ms; rapid shots stack a little (capped). Flying and on foo
 legs trail back and out, stretched with the knees slightly bent and the feet pointed (the right a touch less than the
 left). The pose is set on the model's joints at run time, so it is the same on all three detail levels and the scale is
 unchanged; it blends out on the ground, so standing and walking look as before (`FLIGHT_POSE` in `js/app.js`). The
-cockpit view follows at most 20° of the lean so the horizon stays in view.
+cockpit view follows at most 12° of the lean so the horizon stays in view.
 In flight both characters bank into turns, lean with speed and pitch back when climbing / forward when diving, and turn their
 heads into the turn (up to 30°). The dragon also beats its wings (slowly when cruising, faster and deeper on boost, folded
 when landed) and swings its tail. The chase, far and side cameras and the cockpit / rider's-eye view are sized per character. The chase, far, side and start-screen
@@ -219,7 +219,10 @@ crosshair sits in front of the character on the line from its eyes to that targe
 ahead of the dragon rider's, and the character aims from its eyes through the crosshair to the target (in the chase and
 side views it shows near the head, not at the screen centre). In the cockpit view the eyes are the camera, so the
 crosshair is centred, but it lags the movement a little (about 0.15 s): turning, climbing or sidestepping fast shifts it
-off centre and it settles back; the aim goes through it as drawn.
+off centre and it settles back; the aim goes through it as drawn. The cockpit view also shows the aiming scope, a green
+radar ring (3.5° radius) around the line of sight: the crosshair (and the ring) turn red while the crosshair is outside it
+(lagging a fast turn or climb) or while the target is beyond the weapon's reach from where the body faces. The cockpit
+view tilts with at most 12° of the body lean.
 Fire (F, left click, gamepad RB/X, or the FIRE button on touch screens).
 * **Gundam - beam rifle:** the right arm swings up to aim along the crosshair (the arm and rifle are a separate part pivoted at
   the shoulder), with a recoil kick, a muzzle flash and the head looking at the target. A pink-white beam bolt flies at 600 m/s.
