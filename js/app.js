@@ -487,8 +487,8 @@ void main() {
   // the ground and camera checks must not hit our own shots, smoke and flashes: a fireball leaving the dragon's mouth
   // was read as a roof, lifting the dragon (and the camera) for a frame. Hide them for the pick, then show them again.
   function withOwnFxHidden(fn) {
-    if (typeof effects === "undefined" || (!effects.length && !shots.length)) return fn();
-    const hidden = [beamLines, glowPoints].concat(effects.map((e) => e.sys), shots.map((x) => x.trail)).filter((p) => p && p.show);
+    if (typeof effects === "undefined") return fn();
+    const hidden = [beamLines, glowPoints, plumeBoards, plumeSparks].concat(effects.map((e) => e.sys), shots.map((x) => x.trail)).filter((p) => p && p.show);   // the thruster exhaust is never hit either
     for (const p of hidden) p.show = false;
     try { return fn(); } finally { for (const p of hidden) p.show = true; }
   }
@@ -1760,6 +1760,65 @@ void main() {
     return h && h.position && C.Cartesian3.distance(h.position, pos) < 8 ? h : null;
   }
   function removeShot(s) { if (s.line) beamLines.remove(s.line); if (s.point) glowPoints.remove(s.point); if (s.trail) scene.primitives.remove(s.trail); }
+  // ---- backpack thrusters: blue plasma exhaust ----------------------------------------------------------
+  // Two nozzles under the backpack (body node units: x left, y up, z forward; nozzle exits at y 32.2, z -5.3) blow down
+  // and back. Each plume is a short chain of glowing sprites (a bright white-blue core and a softer blue glow) whose length,
+  // width and brightness flicker fast and irregularly, plus small sparks shed backward that fade. It scales with throttle:
+  // a small flicker hovering, bigger cruising, and on boost much longer, brighter and wider, with an ignition burst when
+  // boost starts. Only while the Gundam is airborne; fewer sprites and sparks on Low.
+  const NOZZLES = [[2.15, 32.4, -5.3], [-2.15, 32.4, -5.3]], PLUME_DIR = [0, -1, -0.45];
+  const PLUME_N = LOW_GFX ? 4 : 8, SPARK_MAX = LOW_GFX ? 6 : 24;
+  const plumeBoards = scene.primitives.add(new C.BillboardCollection());
+  const plumeSparks = scene.primitives.add(new C.PointPrimitiveCollection());
+  const plumeCore = sprite("rgba(235,248,255,1)", "rgba(120,200,255,0.75)"), plumeGlow = sprite("rgba(120,190,255,0.85)", "rgba(40,110,255,0.35)");
+  const plumes = NOZZLES.map(() => ({ core: [], glow: [] }));
+  for (const pl of plumes) for (let k = 0; k < PLUME_N; k++) {
+    pl.glow.push(plumeBoards.add({ image: plumeGlow, sizeInMeters: true, show: false }));
+    pl.core.push(plumeBoards.add({ image: plumeCore, sizeInMeters: true, show: false }));
+  }
+  const sparks = [];
+  const bodyToModel = (a) => { const g = [BODY_T[0] + BODY_S * a[2], BODY_T[1] + BODY_S * a[1], BODY_T[2] - BODY_S * a[0]]; return [g[0], -g[2], g[1]]; };
+  let thrust = { level: 0, burst: 0, wasBoost: false, t: 0 };
+  function updateThrusters(dt) {
+    const on = fly.model && fly.model.show !== false && fly.character !== "dragon" && !fly.walking && !fly.grounded && state.mode === "fly";
+    // throttle: hover 0.3, cruise up to 0.65 with speed, boost 1; an ignition burst as boost starts
+    const target = !on ? 0 : fly.boosting ? 1 : 0.3 + 0.35 * Math.min(1, Math.hypot(fly.vf, fly.vs, fly.vu) / MAX_FWD);
+    thrust.level += (target - thrust.level) * (1 - Math.exp(-dt * (target > thrust.level ? 10 : 4)));
+    if (fly.boosting && !thrust.wasBoost && on) thrust.burst = 1;
+    thrust.wasBoost = !!fly.boosting; thrust.burst = Math.max(0, thrust.burst - dt * 3.5); thrust.t += dt;
+    const lv = thrust.level + 0.6 * thrust.burst, show = on && lv > 0.02;
+    const m = fly.model && fly.model.modelMatrix;
+    const dirM = show ? C.Cartesian3.normalize(C.Matrix4.multiplyByPointAsVector(m, (() => { const a = bodyToModel(PLUME_DIR), b = bodyToModel([0, 0, 0]); return new C.Cartesian3(a[0] - b[0], a[1] - b[1], a[2] - b[2]); })(), new C.Cartesian3()), new C.Cartesian3()) : null;
+    plumes.forEach((pl, ni) => {
+      if (!show) { for (const b of pl.core.concat(pl.glow)) b.show = false; return; }
+      const base = toWorld(m, bodyToModel(NOZZLES[ni]));
+      // fast irregular flicker: a few incommensurate sines plus a little noise, different for each nozzle
+      const tt = thrust.t * (fly.boosting ? 1.6 : 1), fl = 0.78 + 0.12 * Math.sin(tt * 37 + ni * 1.7) + 0.08 * Math.sin(tt * 61 + ni) + 0.07 * (Math.random() - 0.5) * 2;
+      const L = (2.0 + 10 * lv) * fl, W = (1.0 + 1.4 * lv) * (0.9 + 0.2 * Math.sin(tt * 43 + ni * 2.3));
+      for (let k = 0; k < PLUME_N; k++) {
+        const u = (k + 0.5) / PLUME_N, p = C.Cartesian3.add(base, C.Cartesian3.multiplyByScalar(dirM, L * u * 0.9, new C.Cartesian3()), new C.Cartesian3());
+        const taper = 1 - 0.65 * u;
+        const g = pl.glow[k]; g.show = true; g.position = p; g.width = g.height = W * 2.6 * taper * (0.8 + 0.4 * lv);
+        g.color = C.Color.WHITE.withAlpha(Math.min(1, (0.45 + 0.5 * lv) * (1 - 0.5 * u)));
+        const c = pl.core[k]; c.show = true; c.position = p; c.width = c.height = W * 1.1 * taper * (1 - 0.3 * u);
+        c.color = C.Color.WHITE.withAlpha(Math.min(1, (0.55 + 0.45 * lv) * (1 - 0.6 * u)));
+      }
+      // sparks shed backward along the plume, more and faster on boost
+      const rate = show ? (LOW_GFX ? 8 : 30) * lv * lv : 0;
+      thrust["acc" + ni] = (thrust["acc" + ni] || 0) + rate * dt;
+      while (thrust["acc" + ni] >= 1) { thrust["acc" + ni] -= 1;
+        if (sparks.length >= SPARK_MAX) { const old = sparks.shift(); plumeSparks.remove(old.p); }
+        const jitter = new C.Cartesian3((Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4);
+        const v = C.Cartesian3.add(C.Cartesian3.multiplyByScalar(dirM, 25 + 35 * lv, new C.Cartesian3()), C.Cartesian3.multiplyByScalar(jitter, 20, jitter), new C.Cartesian3());
+        const start = C.Cartesian3.add(base, C.Cartesian3.multiplyByScalar(dirM, L * 0.6, new C.Cartesian3()), new C.Cartesian3());
+        sparks.push({ p: plumeSparks.add({ position: start, pixelSize: 4, color: C.Color.fromCssColorString("#bfe6ff") }), v, life: 0.35 + 0.2 * Math.random(), t: 0 });
+      }
+    });
+    for (let i = sparks.length - 1; i >= 0; i--) { const sp = sparks[i]; sp.t += dt;
+      if (sp.t >= sp.life) { plumeSparks.remove(sp.p); sparks.splice(i, 1); continue; }
+      sp.p.position = C.Cartesian3.add(sp.p.position, C.Cartesian3.multiplyByScalar(sp.v, dt, new C.Cartesian3()), new C.Cartesian3());
+      const a = 1 - sp.t / sp.life; sp.p.color = C.Color.fromCssColorString("#bfe6ff").withAlpha(a); sp.p.pixelSize = 2 + 3 * a; }
+  }
   function updateWeapons(dt) {
     fireCooldown = Math.max(0, fireCooldown - dt);
     if (fly.fireT !== undefined && !fly.fireDone && fly.fireT > 0) { const a = crosshairTarget(false); if (a) { fly.fireTarget = a.target; fly.fireHit = a.hit; } }   // the aim follows the crosshair until the shot leaves
@@ -2123,7 +2182,7 @@ void main() {
     if (state.mode === "fly" && rawDt > 0 && rawDt < 1) flyFps = flyFps ? flyFps * 0.97 + 0.03 / rawDt : 1 / rawDt;
     if (state.mode === "fly") {
       updateFlight(dt); if (PROF) t0 = PROF.add("flight", t0);
-      updateWeapons(dt); if (PROF) t0 = PROF.add("weapons+fx", t0);
+      updateWeapons(dt); updateThrusters(dt); if (PROF) t0 = PROF.add("weapons+fx", t0);
       updateCamera(dt); applyShake(dt); updateCrosshair(); if (PROF) t0 = PROF.add("camera", t0);
     }
     else if (state.mode === "lobby" && lobby.active) { readInput(); lobbyCamera(dt); if (PROF) t0 = PROF.add("lobby", t0); }

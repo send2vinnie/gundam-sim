@@ -181,6 +181,13 @@ same with keyboard, gamepad and touch, for both characters.
   when slow, below about 22 m/s). You turn by banking: left/right rolls the body, the turn rate follows the bank angle, and the
   bank stays until you roll back (no auto-level). Boost drains the **BOOST** gauge on the HUD, which recharges when you let go.
 
+## Thrusters
+While the Gundam is airborne, its two backpack thrusters blow blue plasma down and back: each plume is a chain of glowing
+sprites (a bright white-blue core inside a softer blue glow) whose length, width and brightness flicker fast and
+irregularly, with small sparks shed backward. It scales with throttle: a small flicker hovering, bigger when cruising, and
+on boost much longer, brighter and wider with an ignition burst as boost starts. It is off when walking or landed, and Low
+uses fewer sprites and sparks.
+
 ## Walking mode
 A slow touchdown on the street or on a roof switches to walking (the HUD shows **WALK**, **RUN** or **STUMBLE**). In Easy and
 Medium a fast touchdown skims along the ground (LANDED) and switches to walking once it has slowed to about 18 m/s (Gundam) or
