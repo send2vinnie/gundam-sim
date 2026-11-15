@@ -1487,16 +1487,10 @@ void main() {
       // cockpit (Gundam) / rider's eye view (dragon): eye at head height, looking forward
       camera.lookAtTransform(C.Matrix4.IDENTITY);
       const s = Math.sin(fly.az * DEG), c = Math.cos(fly.az * DEG);
-      if (fly.character === "dragon" && fly.walking && fly.model) {   // on foot: the rider's eye moves with the raised body
-        const k = DRAGON_SCALE, eyeW = toWorld(fly.model.modelMatrix, [(RIDER_EYE[0] + 0.7) * k, 0, RIDER_EYE[1] * k]);
-        camera.setView({ destination: eyeW, orientation: { heading: fly.az * DEG + look.yaw, pitch: look.pitch, roll: 0 } });
-        return;
-      }
-      const eye = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
       // looking around (dragging) stays within how far the character's head can turn from where the body faces (the
       // Gundam's head 60 deg to either side, 30 up, 30 down; the dragon's 35, 30, 25), an ellipse; dragging further does
       // nothing. The crosshair and scope stay within the weapon's reach inside that (see updateAim)
-      const tilt = -Math.min(12 * DEG, fly.lean * 0.5);
+      const tilt = fly.character === "dragon" && fly.walking ? 0 : -Math.min(12 * DEG, fly.lean * 0.5);
       let pt = tilt + look.pitch, yw = Math.atan2(Math.sin(look.yaw), Math.cos(look.yaw));
       // ... and never so far that the scope (held at the weapon's reach) leaves the screen (4.5 deg margin)
       const H0 = HEAD_RANGE[fly.character] || HEAD_RANGE.gundam, fy = camera.frustum && camera.frustum.fovy ? camera.frustum.fovy / 2 : 20 * DEG;
@@ -1504,6 +1498,12 @@ void main() {
       const HR = { yaw: Math.min(H0.yaw, GUNDAM_REACH.yaw + fx - m), up: Math.min(H0.up, GUNDAM_REACH.up + fy - m), down: Math.min(H0.down, GUNDAM_REACH.down + fy - m) };
       const e = (yw / HR.yaw) ** 2 + (pt / (pt >= 0 ? HR.up : HR.down)) ** 2;
       if (e > 0.94) { const k = Math.sqrt(0.94 / e); yw *= k; pt *= k; look.yaw = yw; look.pitch = pt - tilt; }   // (just inside the edge)
+      if (fly.character === "dragon" && fly.walking && fly.model) {   // on foot: the rider's eye moves with the raised body
+        const k = DRAGON_SCALE, eyeW = toWorld(fly.model.modelMatrix, [(RIDER_EYE[0] + 0.7) * k, 0, RIDER_EYE[1] * k]);
+        camera.setView({ destination: eyeW, orientation: { heading: fly.az * DEG + yw, pitch: pt, roll: 0 } });
+        return;
+      }
+      const eye = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
       camera.setView({ destination: C.Cartesian3.fromDegrees(eye.lon, eye.lat, fly.h + ch.eye),
         orientation: { heading: fly.az * DEG + yw, pitch: pt, roll: fly.bank * 0.5 } });
       return;
