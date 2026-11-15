@@ -1644,6 +1644,7 @@ void main() {
   }
   function launch() {
     fly.fireDone = true;
+    if (fly.character !== "dragon") { fly.recoil0 = fly.recoil || 0; fly.recoilA = Math.min(1.6, fly.recoil0 + 1); fly.recoilT = 0; }   // recoil: rapid shots stack a little, capped
     const W = WEAPONS[fly.character || "gundam"], dragon = fly.character === "dragon";
     const from = dragon ? dragonMouthWorld() : gundamMuzzleWorld(fly.armAngle || 0);
     if (fly.model) fly.lastLaunch = { from: C.Cartesian3.clone(from), barrel: dragon ? null : rifleBarrelWorld(), target: C.Cartesian3.clone(fly.fireTarget), t: fly.fireT,   // for tests
@@ -1879,17 +1880,21 @@ void main() {
     const footAim = aiming ? -(90 * DEG + (fly.aimPitch || 0) + fly.lean * 0.6) : 0;
     const flyUpper = -(10 * DEG + 0.5 * lean);
     const aim = footAim * (1 - fp) + flyUpper * fp;
-    const recoil = t < 0.25 ? 10 * DEG * Math.exp(-t * 18) : 0;
+    // recoil after each beam (launch): the hand kicks up, peaking in about 60 ms and easing back over about 300 ms. r is
+    // about 1 at the peak of one shot (up to 1.6 for rapid fire). The camera follows the body only, so it stays steady.
+    if (fly.recoilT !== undefined) { fly.recoilT += dt; const T = fly.recoilT;
+      fly.recoil = T < 0.06 ? fly.recoil0 + (fly.recoilA - fly.recoil0) * T / 0.06 : fly.recoilA * Math.exp(-(T - 0.06) / 0.09); }
+    const r = fly.recoil || 0;
     fly.armAngle = (fly.armAngle || 0) + (aim - (fly.armAngle || 0)) * (1 - Math.exp(-dt * (aiming ? 14 : 4)));
     const elbow = -Math.min(125 * DEG, 80 * DEG + 0.5 * lean + (aiming ? FLIGHT_POSE.armR.fireRaise : 0)) * fp;   // forearm forward
     fly.elbowAngle = (fly.elbowAngle || 0) + (elbow - (fly.elbowAngle || 0)) * (1 - Math.exp(-dt * (aiming ? 14 : 4)));
     // walking: the rifle arm swings opposite the right leg, fading out as the arm comes up to aim
     const swing = (fly.armSwing || 0) * Math.max(0, 1 - Math.abs(fly.armAngle) / (30 * DEG));
-    const ang = fly.armAngle + recoil * (1 - fp) + swing;
+    const ang = fly.armAngle - 5 * DEG * r + swing;   // shoulder lifts about 5 deg
     const abd = FLIGHT_POSE.armR.abd * fp;   // the flight pose turns the arm a little out from the body
     fly.armAbd = (fly.armAbd || 0) + (abd - (fly.armAbd || 0)) * (1 - Math.exp(-dt * 10));
     const armRot = C.Matrix3.multiply(C.Matrix3.fromRotationZ(fly.armAbd), C.Matrix3.fromRotationX(ang), new C.Matrix3());
-    const foreRot = C.Matrix3.fromRotationX(fly.elbowAngle + recoil * fp, new C.Matrix3());
+    const foreRot = C.Matrix3.fromRotationX(fly.elbowAngle - 10 * DEG * r, new C.Matrix3());   // forearm flexes up (the hand comes up and back)
     const n = getNodeCached("__arm", "armR"), fn = getNodeCached("__fore", "forearmR"), rn = getNodeCached("__rifle", "rifle");
     if (n) n.matrix = C.Matrix4.fromRotationTranslation(armRot, new C.Cartesian3(ARM_PIVOT[0], ARM_PIVOT[1], ARM_PIVOT[2]));
     if (fn) fn.matrix = C.Matrix4.fromRotationTranslation(foreRot, new C.Cartesian3(ELBOW_R[0], ELBOW_R[1], ELBOW_R[2]));
@@ -1905,10 +1910,14 @@ void main() {
       const d = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, G, new C.Cartesian3()), new C.Cartesian3());
       if (C.Cartesian3.dot(d, level) > -0.2) { dir = d; w = 1; }   // never twist the wrist to fire backwards
     }
-    const target = rifleRotFor(armRot, fly.foreRot, dir);
+    // recoil: the barrel pitches up about 16 deg (with the forearm), about the horizontal axis across the aim line
+    let kdir = dir;
+    if (r > 0.01) { const upW = C.Cartesian3.normalize(G, new C.Cartesian3()), side = C.Cartesian3.cross(dir, upW, new C.Cartesian3());
+      if (C.Cartesian3.magnitude(side) > 1e-6) { C.Cartesian3.normalize(side, side); kdir = C.Matrix3.multiplyByVector(C.Matrix3.fromQuaternion(C.Quaternion.fromAxisAngle(side, 16 * DEG * r)), dir, new C.Cartesian3()); } }
+    const target = rifleRotFor(armRot, fly.foreRot, kdir);
     // the level carry is held exactly (no lag behind the body lean); swings onto and back from a target are smoothed
     const goal = C.Quaternion.slerp(C.Quaternion.IDENTITY, target, w, new C.Quaternion());
-    const k = aiming || fly.rifleBlend < 0.999 ? 1 - Math.exp(-dt * (aiming ? 40 : 6)) : 1;
+    const k = r > 0.01 ? 1 : aiming || fly.rifleBlend < 0.999 ? 1 - Math.exp(-dt * (aiming ? 40 : 6)) : 1;
     fly.rifleBlend = aiming ? 0 : Math.min(1, (fly.rifleBlend || 0) + dt * 2);
     fly.rifleQ = C.Quaternion.slerp(fly.rifleQ || C.Quaternion.IDENTITY, goal, k, new C.Quaternion());
     fly.rifleRot = C.Matrix3.fromQuaternion(fly.rifleQ, fly.rifleRot || new C.Matrix3());

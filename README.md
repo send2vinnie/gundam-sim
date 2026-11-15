@@ -90,7 +90,9 @@ lean. When you fire, the forearm lifts a little and the rifle turns at the fist 
 leaves, the aim keeps following the crosshair (so turning while firing still hits what the crosshair is on). The beam
 leaves from the rifle's muzzle once the barrel points there (within 2°, usually under 0.1 s) and flies along the barrel
 to the point under the crosshair; the dragon's fireball also goes to the point under the crosshair when it leaves the
-mouth. On foot the arm is straight and swings up to aim as before, with the rifle lined up on the target the same way. The shield arm hangs at its side swung a little back with the armpit open 30° and the shield face out, and both
+mouth. On foot the arm is straight and swings up to aim as before, with the rifle lined up on the target the same way. Each beam kicks the hand up with recoil once it has left the muzzle (so the shot is never thrown off): the forearm
+flexes about 10°, the shoulder lifts about 5° and the barrel pitches up about 16°, peaking at about 60 ms and easing
+back within about 300 ms; rapid shots stack a little (capped). Flying and on foot alike; the camera stays steady. The shield arm hangs at its side swung a little back with the armpit open 30° and the shield face out, and both
 legs trail back and out, stretched with the knees slightly bent and the feet pointed (the right a touch less than the
 left). The pose is set on the model's joints at run time, so it is the same on all three detail levels and the scale is
 unchanged; it blends out on the ground, so standing and walking look as before (`FLIGHT_POSE` in `js/app.js`). The
