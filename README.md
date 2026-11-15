@@ -207,6 +207,15 @@ down leaves a scorch burst and smoke at the hit point; past half its health the 
 before it falls) and smokes longer from each hit. The last hit sets off the size-scaled explosion. **Rebuild city**
 resets health and damage.
 
+## Building distortion
+A building hit by a beam or fireball (and not brought down), or crashed into by a character (over about 30 km/h; the
+dragon pushes less), shudders from side to side for about half a second and stays distorted, more with each hit: it leans
+away from the hits (up to about 12% of its height at the top, base fixed) and its corners are pushed out of true, so it
+looks crooked and warped until the last hit brings it down. PLATEAU buildings are low-poly boxes (vertices only at corners
+and edges), so a local dent in the middle of a wall has nothing to move; the whole building distorts instead, from a vertex
+shader on the city tiles (`DENT_SHADER`, 8 buildings at a time, 4 on Low). OSM buildings (Nangang) move as a whole: they
+shudder and sink a little with each hit. Rebuild city resets it; collisions use the undistorted shapes.
+
 ## Walking mode
 A slow touchdown on the street or on a roof switches to walking (the HUD shows **WALK**, **RUN** or **STUMBLE**). In Easy and
 Medium a fast touchdown skims along the ground (LANDED) and switches to walking once it has slowed to about 18 m/s (Gundam) or

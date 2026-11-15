@@ -281,6 +281,101 @@
   const SKY_FILL = [new C.Cartesian3(1.60, 1.63, 1.72)].concat(Array.from({ length: 8 }, () => new C.Cartesian3(0, 0, 0)));
   const skyLight = () => new C.ImageBasedLighting({ sphericalHarmonicCoefficients: SKY_FILL, imageBasedLightingFactor: new C.Cartesian2(1.0, 0.6) });
   // extruded OSM buildings: same idea, as a small shader (ambient floor + sun term)
+  // ---- building deformation ------------------------------------------------------------------------------
+  // A building hit by a beam or fireball (and not brought down), or crashed into by a character, shudders for about half a
+  // second and stays distorted, more with each hit, until the last hit's explosion takes it away. PLATEAU buildings are
+  // low-poly (a box has vertices only at its corners and edges), so a dent in the middle of a wall has nothing to move;
+  // instead the whole building distorts, base fixed and more toward the top: it leans away from where it was hit (up to
+  // about 12% of its height), its corners are pushed out of true (warped, crooked), and it shudders from side to side
+  // across the shot. A vertex shader on the city tiles does it for the hit building only (same feature id, near the hit),
+  // from a few slots (8, 4 on Low) passed as uniforms in eye coordinates each frame; the oldest is dropped when they run
+  // out. OSM buildings (Nangang) are one batched primitive, so each moves as a whole (a per-instance offset): it shudders,
+  // and sinks a little (sags) with each hit. Rebuild city resets all of it. (Collisions and height queries still use the
+  // undistorted shapes.)
+  const DENT_SLOTS = LOW_GFX ? 4 : 8;
+  const dentUniforms = {}; for (let i = 0; i < DENT_SLOTS; i++) for (const [n, v] of [["u_dp", [0, 0, 0, -1]], ["u_db", [0, 0, 0, 1]], ["u_du", [0, 1, 0, 0]], ["u_dd", [0, 0, 1, 0]], ["u_da", [0, 0, 9, 0]]])
+    dentUniforms[n + i] = { type: C.UniformType.VEC4, value: new C.Cartesian4(v[0], v[1], v[2], v[3]) };
+  // u_dp: hit point (EC), feature id; u_db: base point (EC), height H (m); u_du: up (EC), warp (m); u_dd: lean direction
+  // (EC, level, away from the hits), lean at the top (m); u_da: shudder axis (EC, level, across the shot), amplitude (m) in w,
+  // time since the last hit in... (packed: u_da.xyz axis scaled by amplitude, u_da.w time)
+  let dentVs = "void vertexMain(VertexInput vsInput, inout czm_modelVertexOutput vsOutput) {\n  float fid = float(vsInput.featureIds.featureId_0);\n  vec3 pEC = (czm_modelView * vec4(vsOutput.positionMC, 1.0)).xyz;\n  vec3 pm = vsOutput.positionMC;\n  vec3 off = vec3(0.0);\n";
+  for (let i = 0; i < DENT_SLOTS; i++) dentVs += `  if (abs(fid - u_dp${i}.w) < 0.5 && distance(pEC, u_dp${i}.xyz) < u_db${i}.w * 1.5 + 80.0) {
+    float h = clamp(dot(pEC - u_db${i}.xyz, u_du${i}.xyz) / u_db${i}.w, 0.0, 1.0);
+    vec3 up = u_du${i}.xyz, ld = u_dd${i}.xyz, sx = normalize(cross(ld, up));
+    float t = u_da${i}.w, sh = sin(t * 60.0) * exp(-t * 7.0);
+    float w = u_du${i}.w * h;   // warp: corners pushed out of true, each by its own amount (fixed in model space)
+    off += ld * u_dd${i}.w * h * h + u_da${i}.xyz * sh * h + (ld * sin(pm.x * 0.37 + pm.y * 0.23 + pm.z * 0.11) + sx * sin(pm.y * 0.31 - pm.z * 0.27 + pm.x * 0.13)) * w; }\n`;
+  dentVs += "  vsOutput.positionMC += (czm_inverseModelView * vec4(off, 0.0)).xyz;\n}\n";
+  const DENT_SHADER = new C.CustomShader({ uniforms: dentUniforms, vertexShaderText: dentVs });
+  // per building: { fid, url, pos (world, last hit), base (world), up, H, dir (level, away from the hits), lean, warp, amp, side, t }
+  const dents = [], osmDents = new Map();   // osm id -> { sag, amp, t, dir, up }
+  function crashDent(ue, un, hs) {   // a character crashed into a wall: find the building ahead (one GPU pick) and distort it
+    fly.crashT = 0.5;
+    const ch = CH(), o = C.Cartesian3.fromDegrees(fly.lon, fly.lat, fly.h + ch.center), enu = C.Transforms.eastNorthUpToFixedFrame(o);
+    const dir = C.Cartesian3.normalize(C.Matrix4.multiplyByPointAsVector(enu, new C.Cartesian3(ue, un, 0), new C.Cartesian3()), new C.Cartesian3());
+    let h; try { h = withOwnFxHidden(() => scene.pickFromRay(new C.Ray(o, dir), [fly.model, fly.pendingModel, fly.rider].filter(Boolean), 1.0)); } catch (e) { h = undefined; }
+    if (!h || !h.object || !h.position || C.Cartesian3.distance(o, h.position) > 60) return;
+    const z = buildingSize(h.object, h.position), k = z ? blastK(Math.max(2, z.w) * Math.max(2, z.d) * Math.max(2, z.h)) : 1;
+    deformHit(h.object, h.position, dir, k, Math.min(1, hs / 40) * (fly.character === "dragon" ? 0.4 : 1), z);
+    lastCrash = { hs: +hs.toFixed(1), k: +k.toFixed(2) };   // for tests
+  }
+  let lastCrash = null;
+  function deformHit(obj, pos, dirW, k, power, z) {   // k: the building's size factor, power: 1 = a weapon hit, less for a light crash
+    if (!obj || !pos || !dirW) return;
+    const up = C.Cartesian3.normalize(pos, new C.Cartesian3());
+    // level direction of the push (away from the shooter)
+    const dl = C.Cartesian3.subtract(dirW, C.Cartesian3.multiplyByScalar(up, C.Cartesian3.dot(dirW, up), new C.Cartesian3()), new C.Cartesian3());
+    const dir = C.Cartesian3.magnitude(dl) > 1e-3 ? C.Cartesian3.normalize(dl, dl) : C.Cartesian3.normalize(C.Cartesian3.cross(up, C.Cartesian3.UNIT_Z, new C.Cartesian3()), new C.Cartesian3());
+    if (obj instanceof C.Cesium3DTileFeature) {
+      const url = obj.content && obj.content.url, fid = obj.featureId;
+      let d = dents.find((x) => x.url === url && x.fid === fid);
+      if (!d) {
+        if (z === undefined) z = buildingSize(obj, pos);
+        const enu = C.Transforms.eastNorthUpToFixedFrame(pos), H = z ? Math.max(8, z.h) : 30;
+        const base = C.Matrix4.multiplyByPoint(enu, new C.Cartesian3(z && z.cx || 0, z && z.cy || 0, z && z.u0 !== undefined ? z.u0 : -H / 2), new C.Cartesian3());
+        if (dents.length >= DENT_SLOTS) dents.shift();
+        d = { fid, url, pos: C.Cartesian3.clone(pos), base, up, H, foot: z ? Math.min(z.w, z.d) : 20, dir: C.Cartesian3.clone(dir), lean: 0, warp: 0, amp: 0, t: 9 }; dents.push(d);
+      } else { C.Cartesian3.lerp(d.dir, dir, 0.4, d.dir); C.Cartesian3.normalize(d.dir, d.dir); d.pos = C.Cartesian3.clone(pos); }
+      d.lean = Math.min(0.12 * d.H, d.lean + (0.025 * d.H + 0.5) * power);
+      d.warp = Math.min(0.05 * Math.max(d.H, d.foot), d.warp + (0.012 * Math.max(d.H, d.foot) + 0.3) * power);
+      d.amp = (0.6 + 0.012 * d.H + 0.5 * k) * power; d.t = 0;
+      d.side = C.Cartesian3.normalize(C.Cartesian3.cross(d.dir, up, new C.Cartesian3()), new C.Cartesian3());   // shudder axis: level, across the push
+    } else if (typeof obj.id === "string" && obj.id.startsWith("osm-")) {
+      const e = osmDents.get(obj.id) || { sag: 0, amp: 0, t: 9 };
+      e.sag = Math.min(2 + 0.8 * k, e.sag + (0.4 + 0.2 * k) * power); e.amp = (0.6 + 0.9 * k) * power; e.t = 0; e.done = false; e.dir = dir; e.up = up; osmDents.set(obj.id, e);
+    }
+  }
+  function forgetDents(obj) {   // a building came down
+    if (obj instanceof C.Cesium3DTileFeature) { const url = obj.content && obj.content.url; for (let i = dents.length - 1; i >= 0; i--) if (dents[i].url === url && dents[i].fid === obj.featureId) dents.splice(i, 1); }
+    else if (obj && typeof obj.id === "string") osmDents.delete(obj.id);
+  }
+  function clearDents() {
+    dents.length = 0;
+    if (localWorld && localWorld.osmPrimitive) for (const id of osmDents.keys()) { try { localWorld.osmPrimitive.getGeometryInstanceAttributes(id).offset = [0, 0, 0]; } catch (e) { /* ignore */ } }
+    osmDents.clear();
+  }
+  const scratchDentP = new C.Cartesian3();
+  function updateDents(dt) {   // each frame: advance the shudders and hand the slots to the shader in eye coordinates
+    const V = camera.viewMatrix, ec = (p) => C.Matrix4.multiplyByPoint(V, p, scratchDentP), ev = (v) => C.Matrix4.multiplyByPointAsVector(V, v, scratchDentP);
+    for (let i = 0; i < DENT_SLOTS; i++) {
+      const d = dents[i];
+      if (!d) { DENT_SHADER.setUniform("u_dp" + i, new C.Cartesian4(0, 0, 0, -1)); continue; }
+      d.t += dt;
+      let q = ec(d.pos); DENT_SHADER.setUniform("u_dp" + i, new C.Cartesian4(q.x, q.y, q.z, d.fid));
+      q = ec(d.base); DENT_SHADER.setUniform("u_db" + i, new C.Cartesian4(q.x, q.y, q.z, d.H));
+      q = ev(d.up); DENT_SHADER.setUniform("u_du" + i, new C.Cartesian4(q.x, q.y, q.z, d.warp));
+      q = ev(d.dir); DENT_SHADER.setUniform("u_dd" + i, new C.Cartesian4(q.x, q.y, q.z, d.lean));
+      const a = d.t < 1.2 ? d.amp : 0; q = ev(d.side); DENT_SHADER.setUniform("u_da" + i, new C.Cartesian4(q.x * a, q.y * a, q.z * a, d.t));
+    }
+    if (osmDents.size && localWorld && localWorld.osmPrimitive) for (const [id, e] of osmDents) {
+      if (e.done) continue;
+      e.t += dt; const sh = e.amp * Math.sin(e.t * 60) * Math.exp(-e.t * 7);
+      const o = C.Cartesian3.multiplyByScalar(C.Cartesian3.normalize(C.Cartesian3.cross(e.dir, e.up, new C.Cartesian3()), new C.Cartesian3()), sh, new C.Cartesian3());
+      C.Cartesian3.add(o, C.Cartesian3.multiplyByScalar(e.up, -e.sag, new C.Cartesian3()), o);   // sag: sinks straight down
+      try { localWorld.osmPrimitive.getGeometryInstanceAttributes(id).offset = [o.x, o.y, o.z]; } catch (er) { /* ignore */ }
+      e.done = e.t > 1.5;
+    }
+  }
   const OSM_FS = `
 in vec3 v_positionEC;
 in vec3 v_normalEC;
@@ -415,6 +510,7 @@ void main() {
       }); }
     catch (e) { if (!s.original) throw e; console.warn("PLATEAU original tileset failed for " + s.name + ", using the bundled copy", e); s.failed = 3; return openWard(s); }
     finally { if (blob) URL.revokeObjectURL(blob); }
+    ts.customShader = DENT_SHADER;   // hit buildings dent and shudder (see "building deformation")
     ts.tileLoad.addEventListener((tile) => reapplyHidden(tile));   // destroyed buildings stay destroyed when tiles reload
     if (s.original) ts.tileFailed.addEventListener((err) => {   // original tiles keep failing: reopen this area from the bundled copy
       console.warn("PLATEAU tile failed", err && err.url, err && err.message);
@@ -464,7 +560,7 @@ void main() {
             height: f.properties.mh || 0, extrudedHeight: f.properties.h, vertexFormat: C.PerInstanceColorAppearance.VERTEX_FORMAT
           }),
           id: "osm-" + instances.length,
-          attributes: Object.assign({ color: C.ColorGeometryInstanceAttribute.fromColor(C.Color.fromCssColorString("#b9b6ae")), show: new C.ShowGeometryInstanceAttribute(true) },
+          attributes: Object.assign({ color: C.ColorGeometryInstanceAttribute.fromColor(C.Color.fromCssColorString("#b9b6ae")), show: new C.ShowGeometryInstanceAttribute(true), offset: new C.OffsetGeometryInstanceAttribute(0, 0, 0) },
             LOW_GFX ? { distanceDisplayCondition: new C.DistanceDisplayConditionGeometryInstanceAttribute(0, RENDER_DISTANCE) } : {})
         }));
       } catch (e) { /* skip a malformed footprint */ }
@@ -1381,6 +1477,7 @@ void main() {
           if (ph !== undefined && ph > fly.h + stepUp) { // a wall taller than a step: blocked
             fly.block = { ue, un };
             if (hs > 25) { fly.impactT = 0.7; }
+            if (hs > 8 && !(fly.crashT > 0)) crashDent(ue, un, hs);
             // remove forward speed so we don't grind into the wall
             fly.vf *= 0.4; fly.vs *= 0.6;
             break;
@@ -1493,6 +1590,7 @@ void main() {
     if (fly.pendingModel && fly.model) { fly.pendingModel.modelMatrix = fly.model.modelMatrix; fly.pendingModel.show = fly.model.show; }
 
     if (fly.impactT > 0) fly.impactT -= dt;
+    if (fly.crashT > 0) fly.crashT -= dt;
     // HUD
     const spd = Math.hypot(ve, vn, fly.vu) * 3.6;
     const agl = fly.ground !== undefined ? fly.h - fly.ground : NaN;
@@ -1779,12 +1877,13 @@ void main() {
     try { if (obj instanceof C.Cesium3DTileFeature) obj.color = col; else obj.primitive.getGeometryInstanceAttributes(obj.id).color = C.ColorGeometryInstanceAttribute.toValue(C.Color.multiply(C.Color.fromCssColorString("#b9b6ae"), col, new C.Color())); } catch (er) { /* unloaded */ }
     e.color = col;
   }
-  function damageAt(hit) {
+  function damageAt(hit, dir) {
     const obj = hit && hit.object, key = obj && hpKey(obj); if (!key) return false;
     let e = buildingHp.get(key);
     if (!e) { const b = blastOf(obj, hit.position); e = { hits: 0, need: shotsFor(b.z), blast: b, url: obj.content && obj.content.url, id: obj.featureId, key }; buildingHp.set(key, e); }
     e.hits++;
-    if (e.hits >= e.need) { buildingHp.delete(key); destroyAt(hit, e.blast); return true; }
+    if (e.hits >= e.need) { buildingHp.delete(key); forgetDents(obj); destroyAt(hit, e.blast); return true; }
+    deformHit(obj, hit.position, dir || C.Cartesian3.negate(C.Cartesian3.normalize(hit.position, new C.Cartesian3()), new C.Cartesian3()), e.blast.k, 1, e.blast.z);
     // a hit that does not bring it down: a scorch burst and smoke at the hit point, scaled lightly with the building
     const pos = hit.position, k = Math.sqrt(e.blast.k), heavy = e.hits / e.need >= 0.5;
     burst(pos, { inner: "rgba(60,55,50,1)", outer: "rgba(35,32,30,1)", c0: "#3c3732", c1: "rgba(30,28,26,0)", n: 14, v0: 2, v1: 9 * k, life: 1.2, px: 0.9 * k, s0: 1, s1: 1, radius: 1, gravity: 9.8 });
@@ -1806,7 +1905,7 @@ void main() {
       try { ts.root && (function walk(t) { if (t.content && t.content.featuresLength) for (let i = 0; i < t.content.featuresLength; i++) { const ft = t.content.getFeature(i); ft.show = true; ft.color = C.Color.WHITE; } (t.children || []).forEach(walk); })(ts.root); } catch (e) { /* ignore */ } }
     // health and damage shading reset too
     if (localWorld && localWorld.osmPrimitive) for (const e of buildingHp.values()) if (!e.url && e.key) { try { localWorld.osmPrimitive.getGeometryInstanceAttributes(e.key).color = C.ColorGeometryInstanceAttribute.toValue(C.Color.fromCssColorString("#b9b6ae")); } catch (er) { /* ignore */ } }
-    buildingHp.clear();
+    buildingHp.clear(); clearDents();
     hiddenFeatures.clear();
     if (localWorld && localWorld.osmPrimitive) for (const id of hiddenOsm) { try { localWorld.osmPrimitive.getGeometryInstanceAttributes(id).show = C.ShowGeometryInstanceAttribute.toValue(true); } catch (e) { /* ignore */ } }
     hiddenOsm.clear(); destroyedSpots.length = 0;
@@ -2087,13 +2186,14 @@ void main() {
         let hit = impact ? impact.hit : s.hit; const kind = impact ? impact.kind : s.hit ? "aimed" : "air";
         explode(s.pos, s.dragon && kind !== "air");
         if (hit && hit.cpu) hit = identifyHit(s.pos, s.dir);   // found on the CPU: one GPU pick to know which building it is
-        if (hit) damageAt(hit);
+        if (hit) damageAt(hit, s.dir);
         shotLog.push({ kind, dragon: s.dragon, from: s.from, dir: C.Cartesian3.clone(s.dir), travelled: s.travelled }); if (shotLog.length > 200) shotLog.shift();
       }
     }
     updateEffects(dt);
   }
   function updateEffects(dt) {
+    updateDents(dt);
     for (let i = pendingFx.length - 1; i >= 0; i--) { const q = pendingFx[i]; q.t -= dt; if (q.t <= 0) { pendingFx.splice(i, 1); q.fn(); } }
     for (let i = effects.length - 1; i >= 0; i--) {
       const e = effects[i]; e.t += dt;
@@ -2530,7 +2630,7 @@ void main() {
   }
 
   // expose for debugging / automated tests
-  window.GFS = { FLIGHT_POSE, KNEEL_POSE, DRAGON_REST, aimEye, get aim() { return { eye: aimEye(), R: fly.aimR, T: fly.aimT, xy: fly.crosshairXY, out: !!fly.crosshairOut }; }, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, get lastBlast() { return lastBlast; }, get lastHit() { return lastHit; }, buildingSize, damageAt, shotsFor, buildingHp, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
+  window.GFS = { FLIGHT_POSE, KNEEL_POSE, DRAGON_REST, aimEye, get aim() { return { eye: aimEye(), R: fly.aimR, T: fly.aimT, xy: fly.crosshairXY, out: !!fly.crosshairOut }; }, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, get lastBlast() { return lastBlast; }, get lastHit() { return lastHit; }, get lastCrash() { return lastCrash; }, dents, osmDents, deformHit, DENT_SHADER, buildingSize, damageAt, shotsFor, buildingHp, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
 
   (async () => {
     $("startBtn").disabled = true; $("startBtn").textContent = "Loading…";
