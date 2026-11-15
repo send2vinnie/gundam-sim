@@ -218,8 +218,8 @@ lurch forward, no control), then it walks.
   legs folded under it, head a little down) with its wings brought up and in over the rider, the wing claws on top
   pointing up and almost meeting above the rider's head, the membranes draped down around the rider as a shield (held still); fireballs still leave the mouth with the usual aim rules (`DRAGON_REST`).
 * **Camera sway:** the camera rolls side to side with each step and dips a little at each footfall: in the cockpit
-  view about 1.5° walking and 2.7° running for the heavy Gundam (with a deeper dip), 1.6° / 2.8° for the lighter dragon;
-  in the outside views about 0.8° / 1.5° for the Gundam and a third of the cockpit amount for the dragon. In the cockpit view the view also nods down at each footfall and back
+  view about 1.5° walking and 2.7° running for the heavy Gundam (with a deeper dip), 1.0° / 1.7° for the lighter dragon;
+  in the outside views about 0.8° / 1.5° for the Gundam and 0.5° / 0.8° for the dragon. In the cockpit view the view also nods down at each footfall and back
   up (about 2° walking / 3.5° running for the Gundam, 1.2° / 2° for the dragon). It fades in and out as walking starts and
   stops, and is off in flight. In the cockpit the aim is taken from the camera itself, so shots still land under the
   crosshair through the bob and nod.
