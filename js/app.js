@@ -1657,19 +1657,45 @@ void main() {
     if (localWorld && localWorld.osmPrimitive) for (const id of hiddenOsm) { try { localWorld.osmPrimitive.getGeometryInstanceAttributes(id).show = C.ShowGeometryInstanceAttribute.toValue(true); } catch (e) { /* ignore */ } }
     hiddenOsm.clear(); destroyedSpots.length = 0;
   }
-  // what the crosshair (screen centre) points at now: the first real hit along its ray (our own shots, smoke and flashes
-  // hidden), else the point at full range. gpuOk: fall back to a GPU pick when the CPU can't tell (only at the trigger).
-  function crosshairTarget(gpuOk) {
-    const W = WEAPONS[fly.character || "gundam"];
-    const cv = scene.canvas, ray = camera.getPickRay(new C.Cartesian2(cv.clientWidth / 2, cv.clientHeight / 2));
-    let hit = cpuRay(ray, W.range + 200, true);
-    if (hit === null) { if (!gpuOk) { const d = fly.fireTarget ? C.Cartesian3.distance(ray.origin, fly.fireTarget) : W.range;   // unknown on the CPU: same distance, on the crosshair ray
-        return { target: C.Cartesian3.add(ray.origin, C.Cartesian3.multiplyByScalar(ray.direction, d, new C.Cartesian3()), new C.Cartesian3()), hit: fly.fireHit, ray }; } try { hit = withOwnFxHidden(() => scene.pickFromRay(ray, [fly.model, fly.pendingModel, fly.rider].filter(Boolean), 1.0)); } catch (e) { hit = undefined; } }
-    else if (hit) hit = { position: hit.position, cpu: true };
-    let target = hit && hit.position && C.Cartesian3.distance(ray.origin, hit.position) < W.range + 200 ? hit.position : C.Cartesian3.add(ray.origin, C.Cartesian3.multiplyByScalar(ray.direction, W.range, new C.Cartesian3()), new C.Cartesian3());
-    if (!(hit && hit.position && target === hit.position)) hit = null;
-    return { target, hit, ray };
+  // The crosshair is a point in front of the character: at eye height, 5 m ahead of the Gundam's eyes / 1 m ahead of the
+  // rider's, on the line from the eyes to the target. The target is what the camera sees through the crosshair: the first
+  // real surface (our own shots, smoke and flashes hidden) on the camera's line through that point, else the point at
+  // full range. So the eyes, the crosshair and the target are on one line (the character aims through the crosshair), and
+  // on screen the crosshair sits over the target. The two conditions are met together by a few quick refinements per frame.
+  const AIM_AHEAD = { gundam: 5, dragon: 1 };
+  function aimEye() {
+    const ch = CH(), s = Math.sin(fly.az * DEG), c = Math.cos(fly.az * DEG), e = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
+    return C.Cartesian3.fromDegrees(e.lon, e.lat, fly.h + ch.eye);
   }
+  function updateAim(gpuOk) {
+    const W = WEAPONS[fly.character || "gundam"], eye = aimEye(), D = AIM_AHEAD[fly.character] || 5, cam = camera.positionWC;
+    let T = fly.aimT || C.Cartesian3.add(cam, C.Cartesian3.multiplyByScalar(camera.directionWC, W.range, new C.Cartesian3()), new C.Cartesian3());
+    let R, ray, hit = null, known = true;
+    for (let k = 0; k < 3; k++) {
+      const toT = C.Cartesian3.subtract(T, eye, new C.Cartesian3()); if (C.Cartesian3.magnitude(toT) < D + 1) C.Cartesian3.clone(camera.directionWC, toT);
+      R = C.Cartesian3.add(eye, C.Cartesian3.multiplyByScalar(C.Cartesian3.normalize(toT, toT), D, toT), new C.Cartesian3());
+      const dir = C.Cartesian3.normalize(C.Cartesian3.subtract(R, cam, new C.Cartesian3()), new C.Cartesian3());
+      ray = new C.Ray(R, dir);
+      let h = cpuRay(ray, W.range + 200, true);
+      if (h === null && gpuOk && k === 2) { try { h = withOwnFxHidden(() => scene.pickFromRay(ray, [fly.model, fly.pendingModel, fly.rider].filter(Boolean), 1.0)); } catch (e) { h = undefined; } }
+      known = h !== null;
+      if (h && h.position && C.Cartesian3.distance(R, h.position) < W.range + 200) { T = C.Cartesian3.clone(h.position); hit = { position: T, cpu: !!h.distance }; }
+      else { const d = h === null && fly.aimT ? Math.max(D + 1, C.Cartesian3.distance(R, fly.aimT)) : W.range;   // unknown on the CPU: keep the distance
+        T = C.Cartesian3.add(R, C.Cartesian3.multiplyByScalar(dir, d, new C.Cartesian3()), new C.Cartesian3()); hit = h === null ? fly.aimHit || null : null; }
+    }
+    fly.aimT = T; fly.aimHit = hit; fly.aimR = R; fly.aimKnown = known;
+    return { target: T, hit, ray };
+  }
+  // the crosshair on screen: where the point in front of the character is (kept on screen)
+  const crosshairEl = $("crosshair");
+  function updateCrosshair() {
+    updateAim(false);
+    const w = fly.aimR && C.SceneTransforms.worldToWindowCoordinates(scene, fly.aimR), cv = scene.canvas;
+    if (!w) return;
+    fly.crosshairXY = [Math.max(16, Math.min(cv.clientWidth - 16, w.x)), Math.max(16, Math.min(cv.clientHeight - 16, w.y))];
+    crosshairEl.style.left = fly.crosshairXY[0] + "px"; crosshairEl.style.top = fly.crosshairXY[1] + "px";
+  }
+  const crosshairTarget = (gpuOk) => updateAim(gpuOk);
   function requestFire() {
     if (state.mode !== "fly" || !fly.model || fireCooldown > 0) return;
     const W = WEAPONS[fly.character || "gundam"]; fireCooldown = W.cooldown;
@@ -1706,7 +1732,7 @@ void main() {
       }
     }
     if (fly.model) fly.lastLaunch = { from: C.Cartesian3.clone(from), barrel: dragon ? dragonHeadDir() : rifleBarrelWorld(), lunge: dragon ? fly.dHeadFa || 0 : 0, target: C.Cartesian3.clone(fly.fireTarget), t: fly.fireT,   // for tests
-      px: (() => { const w = C.SceneTransforms.worldToWindowCoordinates(scene, fly.fireTarget); return w ? Math.hypot(w.x - scene.canvas.clientWidth / 2, w.y - scene.canvas.clientHeight / 2) : null; })() };
+      px: (() => { const w = C.SceneTransforms.worldToWindowCoordinates(scene, fly.fireTarget), c = fly.crosshairXY || [scene.canvas.clientWidth / 2, scene.canvas.clientHeight / 2]; return w ? Math.hypot(w.x - c[0], w.y - c[1]) : null; })() };   // vs the crosshair as drawn
     const dir = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, from, new C.Cartesian3()), new C.Cartesian3());
     const dist = C.Cartesian3.distance(from, fly.fireTarget);
     if (shots.length >= MAX_SHOTS) {   // too many in the air: the oldest bursts where it is
@@ -2091,7 +2117,7 @@ void main() {
     if (state.mode === "fly") {
       updateFlight(dt); if (PROF) t0 = PROF.add("flight", t0);
       updateWeapons(dt); if (PROF) t0 = PROF.add("weapons+fx", t0);
-      updateCamera(dt); applyShake(dt); if (PROF) t0 = PROF.add("camera", t0);
+      updateCamera(dt); applyShake(dt); updateCrosshair(); if (PROF) t0 = PROF.add("camera", t0);
     }
     else if (state.mode === "lobby" && lobby.active) { readInput(); lobbyCamera(dt); if (PROF) t0 = PROF.add("lobby", t0); }
     else if (state.mode === "pause") readInput();
@@ -2162,7 +2188,7 @@ void main() {
   }
 
   // expose for debugging / automated tests
-  window.GFS = { FLIGHT_POSE, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
+  window.GFS = { FLIGHT_POSE, aimEye, get aim() { return { eye: aimEye(), R: fly.aimR, T: fly.aimT, xy: fly.crosshairXY }; }, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
 
   (async () => {
     $("startBtn").disabled = true; $("startBtn").textContent = "Loading…";
