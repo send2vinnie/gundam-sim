@@ -2118,13 +2118,14 @@ void main() {
     let dir = level, w = fp, want = null;
     if (aiming && fly.fireTarget) {
       // firing: the rifle turns toward the target only within a natural cone around the level carry (25 deg to either side,
-      // 20 deg up, 15 deg down). Flying, the Gundam itself turns toward a target further to the side (quickly; the camera
-      // keeps its view), so the wrist never twists to odd angles. A shot leaves along the barrel either way (see launch).
+      // 20 deg up, 15 deg down). As with the dragon, flying or on foot, the Gundam itself turns toward a target further to
+      // the side (quickly; the camera keeps its view), but not round to one almost straight behind it (beyond 170 deg),
+      // so the wrist never twists to odd angles. A shot leaves along the barrel either way (see launch).
       want = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, G, new C.Cartesian3()), new C.Cartesian3());
       const east = C.Matrix4.multiplyByPointAsVector(enu, C.Cartesian3.UNIT_X, new C.Cartesian3()), north = C.Matrix4.multiplyByPointAsVector(enu, C.Cartesian3.UNIT_Y, new C.Cartesian3()), upE = C.Matrix4.multiplyByPointAsVector(enu, C.Cartesian3.UNIT_Z, new C.Cartesian3());
       let yawOff = Math.atan2(C.Cartesian3.dot(want, east), C.Cartesian3.dot(want, north)) - fly.az * DEG; yawOff = Math.atan2(Math.sin(yawOff), Math.cos(yawOff));
       const pitch = Math.asin(Math.max(-1, Math.min(1, C.Cartesian3.dot(want, upE))));
-      if (fp > 0.5 && Math.abs(yawOff) > 25 * DEG) {   // turn the body toward it (up to 400 deg/s), the camera stays where it looks
+      if (Math.abs(yawOff) > 25 * DEG && Math.abs(yawOff) < 170 * DEG) {   // turn the body toward it (up to 400 deg/s), the camera stays where it looks
         const step = Math.sign(yawOff) * Math.min(Math.abs(yawOff) - 25 * DEG, 400 * DEG * dt);
         fly.az = ((fly.az + step / DEG) % 360 + 360) % 360; look.yaw -= step; yawOff -= step;
       }

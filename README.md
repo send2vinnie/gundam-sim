@@ -88,8 +88,9 @@ carried low: the upper arm hangs down, a little forward and out (armpit open abo
 forearm points forward, and the rifle is turned at the fist so its barrel stays exactly level along the heading at any
 lean. When you fire, the forearm lifts a little and the rifle turns at the fist to the crosshair target, but only
 within a natural cone around the carry (25° to either side, 20° up, 15° down) and never rolled (its sight stays on top);
-a target further to the side turns the whole Gundam toward it (quickly, while the camera keeps its view), and a shot the
-rifle can't point at goes along the barrel instead; until the shot
+as with the dragon, flying or on foot, a target further to the side turns the whole Gundam toward it (quickly, while the
+camera keeps its view) but one almost straight behind it does not, and a shot the rifle can't point at goes along the
+barrel instead; until the shot
 leaves, the aim keeps following the crosshair (so turning while firing still hits what the crosshair is on). The beam
 leaves from the rifle's muzzle once the barrel points there (within 2°, usually under 0.1 s) and flies along the barrel
 to the point under the crosshair; the dragon's fireball also goes to the point under the crosshair when it leaves the
