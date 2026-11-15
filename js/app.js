@@ -1576,7 +1576,7 @@ void main() {
   // ---- weapons: beam rifle (Gundam) and fireball (dragon); destructible buildings ----------------------
   // One ray per shot (from the crosshair) finds what it will hit; the projectile then just flies there, so firing stays cheap.
   const WEAPONS = { gundam: { speed: 600, range: 1600, cooldown: 0.35 }, dragon: { speed: 80, range: 800, cooldown: 0.9 } };
-  const MAX_SHOTS = LOW_GFX ? 3 : 6, MAX_FX = LOW_GFX ? 7 : 12, FX_SCALE = LOW_GFX ? 0.5 : 1;   // fewer projectiles/particles on Low
+  const MAX_SHOTS = LOW_GFX ? 3 : 6, MAX_FX = LOW_GFX ? 10 : 22, FX_SCALE = LOW_GFX ? 0.5 : 1;   // fewer projectiles/particles on Low
   const ARM_PIVOT = [-6.4, 38.6, -0.9], MUZZLE = [0.01, -36.79, 1.38];             // gundam_rx78_18m*.glb: armR node (model units)
   const RIFLE_GRIP = [-0.4, -14.0, 0.2], ELBOW_R = [-0.3, -5.0, 0.0];              // fist (rifle node) and elbow (forearmR) pivots in armR units (tools/build_gundam_rifle.js)
   const BODY_T = [-0.23696897, 0, 0], BODY_S = 0.3889163389802798;                   // body node transform (rotation +90 deg about Y)
@@ -1665,7 +1665,8 @@ void main() {
       startColor: C.Color.fromCssColorString(o.c0), endColor: C.Color.fromCssColorString(o.c1), startScale: o.s0 || 1, endScale: o.s1 || 3,
       minimumParticleLife: o.life * 0.6, maximumParticleLife: o.life, minimumSpeed: o.v0, maximumSpeed: o.v1, imageSize: new C.Cartesian2(o.px, o.px),
       emissionRate: 0, bursts: [new C.ParticleBurst({ time: 0, minimum: Math.round(o.n * FX_SCALE), maximum: Math.round(o.n * FX_SCALE) })], lifetime: 60, loop: false, sizeInMeters: true,   // one burst; removed by updateEffects
-      updateCallback: gravity ? (p, dt) => { C.Cartesian3.normalize(p.position, sc); C.Cartesian3.multiplyByScalar(sc, -gravity * dt, sc); C.Cartesian3.add(p.velocity, sc, p.velocity); } : undefined
+      updateCallback: o.flat ? (p) => { C.Cartesian3.normalize(p.position, sc); C.Cartesian3.multiplyByScalar(sc, C.Cartesian3.dot(p.velocity, sc), sc); C.Cartesian3.subtract(p.velocity, sc, p.velocity); }   // stays level: an expanding ring
+        : gravity ? (p, dt) => { C.Cartesian3.normalize(p.position, sc); C.Cartesian3.multiplyByScalar(sc, -gravity * dt, sc); C.Cartesian3.add(p.velocity, sc, p.velocity); } : undefined
     }), o.life + 0.3, o.dust);
   }
   function flash(pos, color, size, life) { const pt = glowPoints.add({ position: pos, color: C.Color.fromCssColorString(color), pixelSize: size, outlineWidth: 0, disableDepthTestDistance: 0 });
@@ -1679,20 +1680,45 @@ void main() {
     if (settings.camShake) { const d = C.Cartesian3.distance(camera.positionWC, pos); shake = Math.max(shake, Math.min(big ? 0.8 : 0.6, (big ? 60 : 30) / Math.max(30, d))); }   // only with "Camera shake" on (off by default): the view stays still on impacts
   }
   // Building destruction scales with the building: k from the cube root of its volume (width x depth x height, metres)
-  // against a 22 m cube (k = 1), clamped to 0.4 (a small house: a small pop) .. 4.5 (a skyscraper: a huge blast; 3 on
-  // Low, where big sprites cost too much fill on phones). Sizes
-  // (fireball, smoke, dust cloud, debris spread), duration, flash and camera shake grow with k; particle counts grow only
-  // up to 2.2x (and are halved on Low by FX_SCALE), so a tower costs little more than a house.
+  // against a 22 m cube (k = 1), clamped to 0.4 .. 4.5 (3 on Low, where big sprites cost too much fill on phones), and
+  // "mass" m = 0 below k 0.8 rising to 1 at k 3.5, which brings in the massive layers:
+  //  * every building: a fireball, dust cloud and debris at the hit, sized by k (a small house: one small pop, almost no
+  //    smoke, minimal shake);
+  //  * m > 0: staggered secondary explosions climbing the building (1 + 6 m of them, 0.16 s apart, from its base to its
+  //    top), a level shockwave of dust racing out along the ground from its base, a tall smoke and fire column rising from
+  //    it and lingering for seconds, debris thrown far, a big flash and a longer, stronger shake (with "Camera shake" on).
+  // Sizes grow with k; particle counts grow at most 2.2x per layer and are halved on Low (FX_SCALE).
   const BLAST_REF = 22, BLAST_MAX = LOW_GFX ? 3 : 4.5, blastK = (vol) => Math.max(0.4, Math.min(BLAST_MAX, Math.cbrt(Math.max(1, vol)) / BLAST_REF));
-  function collapse(pos, k) { // fireball, smoke, dust cloud and falling debris where a building came down
-    k = k || 1; const nk = Math.min(2.2, k), lk = 0.75 + 0.25 * k;   // particle count and duration factors
+  const pendingFx = [];   // delayed effects (game time): { t, fn }
+  function blastShake(pos, amp) { if (!settings.camShake) return; const d = C.Cartesian3.distance(camera.positionWC, pos); shake = Math.max(shake, Math.min(amp, amp * 120 / Math.max(60, d))); }
+  function collapse(pos, k, z) { // a building coming down: fireball, smoke, dust and debris, and for big buildings much more
+    k = k || 1; const nk = Math.min(2.2, k), lk = 0.75 + 0.25 * k, m = Math.max(0, Math.min(1, (k - 0.8) / 2.7));
     burst(pos, { inner: "rgba(255,255,230,1)", outer: "rgba(255,140,30,1)", c0: "rgba(255,205,120,1)", c1: "rgba(190,50,0,0)", n: 40 * nk, v0: 4 * k, v1: 18 * k, life: 1.4 * lk, px: 8 * k, s0: 1, s1: 3.5, radius: 3 * k });
-    burst(pos, { inner: "rgba(95,90,85,0.9)", outer: "rgba(60,58,55,0.6)", c0: "rgba(95,90,85,0.8)", c1: "rgba(55,55,55,0)", n: 24 * nk, v0: 2 * k, v1: 7 * k, life: 3.5 * lk, px: 14 * k, s0: 1, s1: 4.5, radius: 6 * k });
+    if (k >= 0.6) burst(pos, { inner: "rgba(95,90,85,0.9)", outer: "rgba(60,58,55,0.6)", c0: "rgba(95,90,85,0.8)", c1: "rgba(55,55,55,0)", n: 24 * nk, v0: 2 * k, v1: 7 * k, life: 3.5 * lk, px: 14 * k, s0: 1, s1: 4.5, radius: 6 * k });
     burst(pos, { inner: "rgba(200,190,170,0.9)", outer: "rgba(150,140,125,0.6)", c0: "rgba(190,180,160,0.85)", c1: "rgba(150,140,125,0)", n: 60 * nk, v0: 2 * k, v1: 8 * k, life: 4.5 * lk, px: 18 * k, s0: 1, s1: 5, radius: 15 * k });
-    burst(pos, { inner: "rgba(90,85,80,1)", outer: "rgba(70,65,60,1)", c0: "#5a544c", c1: "rgba(60,55,50,0)", n: 50 * nk, v0: 3 * k, v1: 14 * k, life: 3.0 * lk, px: 1.8 * Math.sqrt(k), s0: 1, s1: 1, radius: 10 * k, gravity: 9.8 });
-    flash(pos, "rgba(255,230,180,0.95)", 110 * k, 0.15 + 0.1 * k);
-    if (settings.camShake) { const d = C.Cartesian3.distance(camera.positionWC, pos); shake = Math.max(shake, Math.min(0.3 + 0.25 * k, 40 * k / Math.max(30, d))); }
-    lastBlast = { k, pos: C.Cartesian3.clone(pos) };   // for tests
+    burst(pos, { inner: "rgba(90,85,80,1)", outer: "rgba(70,65,60,1)", c0: "#5a544c", c1: "rgba(60,55,50,0)", n: 50 * nk, v0: 3 * k, v1: (14 + 30 * m) * k, life: (3.0 + 2 * m) * lk, px: (1.8 + 2 * m) * Math.sqrt(k), s0: 1, s1: 1, radius: 10 * k, gravity: 9.8 });
+    flash(pos, "rgba(255,230,180,0.95)", 110 * k * (1 + m), 0.15 + 0.1 * k + 0.3 * m);
+    blastShake(pos, 0.15 + 0.2 * k + 0.6 * m);
+    lastBlast = { k, m, pos: C.Cartesian3.clone(pos), layers: 0, secondaries: 0 };   // for tests
+    if (m <= 0) return;
+    // the building's axis: from its base to its top at the centre of its footprint (else straight down/up from the hit)
+    const enu = C.Transforms.eastNorthUpToFixedFrame(pos), at = (e, n, u) => C.Matrix4.multiplyByPoint(enu, new C.Cartesian3(e, n, u), new C.Cartesian3());
+    const H = z ? Math.max(10, z.h) : 30 * k, cx = (z && z.cx) || 0, cy = (z && z.cy) || 0, u0 = z && z.u0 !== undefined ? z.u0 : -H / 2;
+    const zw = z ? z.w : 10, zd = z ? z.d : 10, foot = Math.max(6, Math.min(zw, zd));
+    // secondary explosions climbing the building
+    const ns = Math.max(1, Math.round((1 + 6 * m) * (LOW_GFX ? 0.5 : 1))), lb = lastBlast;
+    for (let i = 0; i < ns; i++) { const p = at(cx + (Math.random() - 0.5) * 0.3 * zw, cy + (Math.random() - 0.5) * 0.3 * zd, u0 + H * (ns === 1 ? 0.5 : i / (ns - 1)));
+      pendingFx.push({ t: 0.12 + 0.16 * i, fn: () => {
+        burst(p, { inner: "rgba(255,255,220,1)", outer: "rgba(255,120,20,1)", c0: "rgba(255,200,110,1)", c1: "rgba(170,40,0,0)", n: 26 * nk, v0: 3 * k, v1: 14 * k, life: 1.6 * lk, px: 9 * k, s0: 1, s1: 3.5, radius: 4 * k });
+        flash(p, "rgba(255,210,150,0.9)", 80 * k, 0.25); blastShake(p, 0.3 + 0.5 * m); lb.layers++; } }); }
+    // ground shockwave: a ring of dust racing out level from the base
+    pendingFx.push({ t: 0.25, fn: () => { burst(at(cx, cy, u0 + 2), { inner: "rgba(215,205,185,0.85)", outer: "rgba(170,160,140,0.5)", c0: "rgba(205,195,175,0.8)", c1: "rgba(170,160,140,0)", n: 70 * nk, v0: 25 * k, v1: 40 * k, life: 2.6 + 1.2 * m, px: 16 * k, s0: 1, s1: 4, radius: 3 * k, flat: true }); lb.layers++; } });
+    // a tall smoke and fire column rising from the ruins and lingering
+    pendingFx.push({ t: 0.5, fn: () => {
+      burst(at(cx, cy, u0 + H * 0.3), { inner: "rgba(80,75,70,0.9)", outer: "rgba(45,42,40,0.55)", c0: "rgba(85,80,75,0.85)", c1: "rgba(40,40,40,0)", n: 45 * nk, v0: 2, v1: 6 * k, life: 7 + 4 * m, px: 22 * k, s0: 1, s1: 6, radius: 0.25 * foot, gravity: -2.5 - 2 * m });
+      burst(at(cx, cy, u0 + H * 0.15), { inner: "rgba(255,240,200,1)", outer: "rgba(255,110,20,0.9)", c0: "rgba(255,170,70,0.95)", c1: "rgba(120,30,0,0)", n: 24 * nk, v0: 1, v1: 4 * k, life: 3 + 2 * m, px: 10 * k, s0: 1, s1: 2.5, radius: 0.2 * foot, gravity: -4 });
+      lb.layers++; } });
+    lb.secondaries = ns;
   }
   let lastBlast = null;
   // size of a destroyed building (metres): PLATEAU, from its own triangles in the tile's triangle grid (else its measured
@@ -1707,7 +1733,7 @@ void main() {
           for (let v = 0; v < 3; v++) { const b = t * 9 + v * 3, x = T[b] + o[0] - pos.x, y = T[b + 1] + o[1] - pos.y, z = T[b + 2] + o[2] - pos.z;
             const p = [x * east.x + y * east.y + z * east.z, x * north.x + y * north.y + z * north.z, x * up.x + y * up.y + z * up.z];
             for (let a = 0; a < 3; a++) { if (p[a] < mn[a]) mn[a] = p[a]; if (p[a] > mx[a]) mx[a] = p[a]; } } }
-        if (n) return { w: mx[0] - mn[0], d: mx[1] - mn[1], h: mx[2] - mn[2] }; }
+        if (n) return { w: mx[0] - mn[0], d: mx[1] - mn[1], h: mx[2] - mn[2], cx: (mx[0] + mn[0]) / 2, cy: (mx[1] + mn[1]) / 2, u0: mn[2] }; }
       for (const key of ["bldg:measuredHeight", "measuredHeight", "計測高さ", "height"]) { try { const h = +obj.getProperty(key); if (h > 0) return { w: Math.max(8, h * 0.6), d: Math.max(8, h * 0.6), h }; } catch (e) { /* no such attribute */ } }
       return null;
     }
@@ -1715,11 +1741,12 @@ void main() {
       const f = localWorld.osm.features[+obj.id.slice(4)]; if (!f) return null;
       const ring = f.geometry.coordinates[0], lat0 = ring[0][1] * DEG; let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
       for (const [lo, la] of ring) { const x = lo * DEG * 6371000 * Math.cos(lat0), y = la * DEG * 6371000; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-      return { w: x1 - x0, d: y1 - y0, h: (f.properties.h || 10) - (f.properties.mh || 0) };
+      const ph = C.Cartographic.fromCartesian(pos).height;
+      return { w: x1 - x0, d: y1 - y0, h: (f.properties.h || 10) - (f.properties.mh || 0), u0: (f.properties.mh || 0) - ph };
     }
     return null;
   }
-  function blastScale(obj, pos) { const z = buildingSize(obj, pos); return z ? blastK(Math.max(2, z.w) * Math.max(2, z.d) * Math.max(2, z.h)) : 1; }
+  function blastOf(obj, pos) { const z = buildingSize(obj, pos); return { k: z ? blastK(Math.max(2, z.w) * Math.max(2, z.d) * Math.max(2, z.h)) : 1, z }; }
   function destroyAt(hit) {
     const obj = hit.object, pos = hit.position;
     // PLATEAU buildings are skipped by feature id in the CPU queries; elsewhere (OSM) queries near the spot
@@ -1728,13 +1755,13 @@ void main() {
     if (obj instanceof C.Cesium3DTileFeature) {             // PLATEAU building: hide it (and keep it hidden when its tile reloads)
       const url = obj.content && obj.content.url; const id = obj.featureId;
       setTimeout(() => { try { obj.show = false; } catch (e) { /* tile unloaded */ } }, 350);
-      const k = blastScale(obj, pos);   // (measured before the building is marked destroyed)
+      const b = blastOf(obj, pos);   // (measured before the building is marked destroyed)
       if (url !== undefined) { if (!hiddenFeatures.has(url)) hiddenFeatures.set(url, new Set()); hiddenFeatures.get(url).add(id); }
-      collapse(pos, k); return;
+      collapse(pos, b.k, b.z); return;
     }
     if (obj && obj.primitive && typeof obj.id === "string" && obj.id.startsWith("osm-")) { // OSM building (Nangang)
       try { obj.primitive.getGeometryInstanceAttributes(obj.id).show = C.ShowGeometryInstanceAttribute.toValue(false); hiddenOsm.add(obj.id); } catch (e) { /* ignore */ }
-      collapse(pos, blastScale(obj, pos)); return;
+      { const b = blastOf(obj, pos); collapse(pos, b.k, b.z); } return;
     }
   }
   function reapplyHidden(tile) {
@@ -2032,6 +2059,7 @@ void main() {
     updateEffects(dt);
   }
   function updateEffects(dt) {
+    for (let i = pendingFx.length - 1; i >= 0; i--) { const q = pendingFx[i]; q.t -= dt; if (q.t <= 0) { pendingFx.splice(i, 1); q.fn(); } }
     for (let i = effects.length - 1; i >= 0; i--) {
       const e = effects[i]; e.t += dt;
       if (e.point) { const u = e.t / e.life; e.point.pixelSize = e.size * (1 + u); e.point.color = e.point.color.withAlpha(Math.max(0, 1 - u)); }

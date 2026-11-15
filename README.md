@@ -192,9 +192,12 @@ uses fewer sprites and sparks.
 ## Building explosions
 A destroyed building blows up in proportion to its size: k = cube root of its volume (width × depth × height in metres,
 measured from the building's own geometry in the PLATEAU tile, or its OSM footprint and height) / 22 m, clamped to 0.4 - 4.5
-(3 on Low). A small house (about 5 × 6 × 10 m) gives a small pop (k 0.4); a mid-rise about 0.6 - 2; Nishi-Shinjuku towers
-(130 - 210 m) a huge blast (k 4 - 4.5). The fireball, smoke and dust sizes and spread grow with k, the duration by
-0.75 + 0.25 k, the flash and the camera shake (if on) with k; particle counts grow at most 2.2× and are halved on Low.
+(3 on Low). Every building gets a fireball, dust and debris sized by k; a small house (about 5 × 6 × 10 m, k 0.4) is just
+one small pop with almost no smoke. From k 0.8 a "mass" factor (0 to 1 at k 3.5) adds the massive layers: staggered
+secondary explosions climbing the building from its base to its top (up to 7, 0.16 s apart), a level dust shockwave
+racing out along the ground, a tall smoke-and-fire column rising and lingering for 7 - 11 s, debris thrown far, a bigger
+flash and a stronger, longer camera shake (if on). Nishi-Shinjuku towers (130 - 210 m) get all of it. Particle counts
+grow at most 2.2× per layer and are halved on Low (fewer secondaries too).
 
 ## Walking mode
 A slow touchdown on the street or on a roof switches to walking (the HUD shows **WALK**, **RUN** or **STUMBLE**). In Easy and
