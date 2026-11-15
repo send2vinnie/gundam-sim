@@ -193,7 +193,7 @@ lurch forward, no control), then it walks.
   Gundam, 0.8 m for the dragon). Anything taller is a wall and blocks you. Walking off a higher edge (more than 4 m / 1.5 m)
   drops you into flight. Up (Space, RT, right stick up) jumps and takes off.
 * **Gundam:** its legs are jointed at the hip, knee and ankle (split out of the flight model by tools/build_gundam_legs.js), so
-  it walks with a stride that lengthens when running, a body bob that keeps the lower foot on the ground, the shield arm (with
+  it walks with a stride that lengthens when running, the arms set back from the body and swinging with the elbows bent so the forearms come forward and up (more on each arm's forward swing and when running; the shield arm bends less so the shield stays upright), a body bob that keeps the lower foot on the ground, the shield arm (with
   the whole shield) and (when not aiming) the rifle arm swinging opposite the legs, a slight forward lean when running, and a dust puff at each
   footfall. "Camera shake" in Settings (off by default) adds a tiny nudge per step.
 * **Dragon:** stands up from its flight attitude (about 30° forward lean, 40° when running) and walks on its own legs: hip,

@@ -1840,6 +1840,14 @@ void main() {
   }
   // shoulder swing for the flight pose: "reach" arms follow the body lean (fixed in the world), "back" arms stay relative to the torso
   const armReach = (a) => (a.back !== undefined ? a.back : -Math.min(a.max, a.reach + Math.max(0, fly.lean))) * (fly.flyPose || 0);
+  // walking arm pose (radians; + = back for the upper arm, - = forearm forward/up at the elbow), from the gait phase:
+  // a backward bias of the upper arms, and an elbow bend that grows on each arm's forward swing and when running
+  function walkArms(ph, g, r) {
+    const fwdL = Math.max(0, -Math.sin(ph)), fwdR = Math.max(0, Math.sin(ph));   // how far each arm is in its forward swing
+    const bend = (fwd) => -((32 + 10 * r) + (22 + 10 * r) * fwd) * DEG * g;
+    // the shield arm bends less (at most 40 deg), so the big shield stays upright beside the body
+    return { back: (12 + 6 * r) * DEG * g, elbowL: Math.max(-40 * DEG, 0.55 * bend(fwdL)), elbowR: bend(fwdR) };
+  }
   function setLeg(node, name, ang) { const t = LEG_NODES[name]; node.matrix = C.Matrix4.fromRotationTranslation(C.Matrix3.fromRotationX(ang, scratchLegM3), new C.Cartesian3(t[0], t[1], t[2]), node.matrix ? C.Matrix4.clone(node.matrix) : new C.Matrix4()); }
   function updateGait(dt, speed, WK) {
     // gait: 0 standing .. 1 walking, gaitRun 0 walk .. 1 run; the phase advances with the distance covered
@@ -1883,11 +1891,15 @@ void main() {
         const fp = fly.flyPose || 0, P = FLIGHT_POSE;
         setLegPose(legs.thighL, "thighL", L.hip + P.thighL[0] * fp, P.thighL[1] * fp); setLeg(legs.shinL, "shinL", L.knee + P.shinL * fp); setLeg(legs.footL, "footL", L.foot + P.footL * fp);
         setLegPose(legs.thighR, "thighR", R.hip + P.thighR[0] * fp, P.thighR[1] * fp); setLeg(legs.shinR, "shinR", R.knee + P.shinR * fp); setLeg(legs.footR, "footR", R.foot + P.footR * fp);
-        setLegPose(legs.armL, "armL", (14 + 18 * r) * DEG * g * Math.sin(ph) + 10 * DEG * st + armReach(P.armL), P.armL.abd * fp, P.armL.twist * fp);   // shield arm swings opposite the left leg
+        // walking arms: the upper arms sit back from the body and swing back further than forward, and the elbows bend so
+        // the forearms come forward and up, more on the forward swing and when running (like a natural walk/run)
+        const W = walkArms(ph, g, r), wf = 1 - fp;
+        setLegPose(legs.armL, "armL", (14 + 18 * r) * DEG * g * Math.sin(ph) + W.back * wf + 10 * DEG * st + armReach(P.armL), P.armL.abd * fp, P.armL.twist * fp);   // shield arm swings opposite the left leg
         // left elbow (forearmL: forearm, fist and shield): flying, a slight bend and the forearm turned back in under the
-        // opened upper arm, so the shield hangs lower beside the thigh; straight on foot (the walking swing is unchanged)
+        // opened upper arm, so the shield hangs lower beside the thigh; on foot, the walking bend
         const fl = getNodeCached("__foreL", "forearmL");
-        if (fl) fl.matrix = C.Matrix4.fromRotationTranslation(C.Matrix3.multiply(C.Matrix3.fromRotationZ(-P.armL.hang * fp), C.Matrix3.fromRotationX(-Math.min(95 * DEG, P.armL.elbow + Math.max(0, fly.lean)) * fp), new C.Matrix3()), new C.Cartesian3(0.3, -5.0, 0.0));
+        if (fl) fl.matrix = C.Matrix4.fromRotationTranslation(C.Matrix3.multiply(C.Matrix3.fromRotationZ(-P.armL.hang * fp), C.Matrix3.fromRotationX(-Math.min(95 * DEG, P.armL.elbow + Math.max(0, fly.lean)) * fp + W.elbowL * wf), new C.Matrix3()), new C.Cartesian3(0.3, -5.0, 0.0));
+        fly.walkArms = W;
       }
       fly.armSwing = -(14 + 18 * r) * DEG * g * Math.sin(ph);   // rifle arm: forward when the left leg is forward
       // the lower foot stays on the ground: drop the body by how much the legs are shortened
@@ -1958,11 +1970,13 @@ void main() {
     fly.elbowAngle = (fly.elbowAngle || 0) + (elbow - (fly.elbowAngle || 0)) * (1 - Math.exp(-dt * (aiming ? 14 : 4)));
     // walking: the rifle arm swings opposite the right leg, fading out as the arm comes up to aim
     const swing = (fly.armSwing || 0) * Math.max(0, 1 - Math.abs(fly.armAngle) / (30 * DEG));
-    const ang = fly.armAngle - 5 * DEG * r + swing;   // shoulder lifts about 5 deg
+    // walking (on foot, not aiming): the arm sits back and the elbow bends (walkArms); both fade out as the arm comes up to aim
+    const walkK = (1 - fp) * Math.max(0, 1 - Math.abs(fly.armAngle) / (30 * DEG)), WA = fly.walkArms || { back: 0, elbowR: 0 };
+    const ang = fly.armAngle - 5 * DEG * r + swing + WA.back * walkK;   // shoulder lifts about 5 deg
     const abd = FLIGHT_POSE.armR.abd * fp;   // the flight pose turns the arm a little out from the body
     fly.armAbd = (fly.armAbd || 0) + (abd - (fly.armAbd || 0)) * (1 - Math.exp(-dt * 10));
     const armRot = C.Matrix3.multiply(C.Matrix3.fromRotationZ(fly.armAbd), C.Matrix3.fromRotationX(ang), new C.Matrix3());
-    const foreRot = C.Matrix3.fromRotationX(fly.elbowAngle - 10 * DEG * r, new C.Matrix3());   // forearm flexes up (the hand comes up and back)
+    const foreRot = C.Matrix3.fromRotationX(fly.elbowAngle - 10 * DEG * r + WA.elbowR * walkK, new C.Matrix3());   // forearm flexes up (the hand comes up and back)
     const n = getNodeCached("__arm", "armR"), fn = getNodeCached("__fore", "forearmR"), rn = getNodeCached("__rifle", "rifle");
     if (n) n.matrix = C.Matrix4.fromRotationTranslation(armRot, new C.Cartesian3(ARM_PIVOT[0], ARM_PIVOT[1], ARM_PIVOT[2]));
     if (fn) fn.matrix = C.Matrix4.fromRotationTranslation(foreRot, new C.Cartesian3(ELBOW_R[0], ELBOW_R[1], ELBOW_R[2]));
