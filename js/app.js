@@ -1756,11 +1756,9 @@ void main() {
     clampCockpitCrosshair(w);
     fly.crosshairXY = [Math.max(16, Math.min(cv.clientWidth - 16, w.x)), Math.max(16, Math.min(cv.clientHeight - 16, w.y))];
     crosshairEl.style.left = fly.crosshairXY[0] + "px"; crosshairEl.style.top = fly.crosshairXY[1] + "px";
-    // cockpit: the aiming scope, a green radar ring around the aim (the line of sight, held at the weapon's reach when looking
-    // further; a 3.5 deg radius, sized with the
-    // camera's field of view so it scales with the screen). The crosshair turns red while it is outside the scope (it lags a
-    // fast turn or climb) or while the target is beyond the weapon's reach from where the body faces (the rifle turns 25 deg
-    // to either side, 20 up and 15 down; the dragon's head 35, 30 and 25), e.g. when looking around.
+    // cockpit: the aiming scope, a plain green circle around the aim (the line of sight, held at the weapon's reach when
+    // looking further; a 3.5 deg radius, sized with the camera's field of view so it scales with the screen). The crosshair
+    // and the circle always stay green; the crosshair is kept inside the circle (clampCockpitCrosshair).
     const cockpit = CAMS[fly.cam].range === 0;
     scopeEl.hidden = !cockpit;
     let out = false;
@@ -1769,7 +1767,7 @@ void main() {
       if (c) { scopeEl.style.left = (c.x - r) + "px"; scopeEl.style.top = (c.y - r) + "px"; scopeEl.style.width = scopeEl.style.height = 2 * r + "px"; }
       out = !!fly.aimPinned || (c && Math.hypot(w.x - c.x, w.y - c.y) > r * 1.01);
     }
-    crosshairEl.classList.toggle("out", out); scopeEl.classList.toggle("alert", out); fly.crosshairOut = out;
+    fly.crosshairOut = out;   // (for tests only: the crosshair and the circle always stay green)
   }
   const scopeEl = $("aimScope");
   // the scope ring: around the aim direction held within the weapon's reach (the screen centre unless looking beyond it)

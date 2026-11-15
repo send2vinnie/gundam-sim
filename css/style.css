@@ -133,17 +133,9 @@ dialog a { color: var(--accent); }
 .crosshair { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; pointer-events: none;
   background: radial-gradient(circle, var(--hud) 0 2px, transparent 3px), linear-gradient(var(--hud), var(--hud)) center / 2px 9px no-repeat, linear-gradient(90deg, var(--hud), var(--hud)) center / 9px 2px no-repeat;
   border: 2px solid rgba(125,255,176,.75); border-radius: 50%; opacity: .85; }
-.crosshair.out { --hud: #ff5050; border-color: rgba(255,80,80,.9); opacity: 1; }
-/* cockpit aiming scope: the weapon's aim cone as a green radar ring (sized and placed from js) */
-.aim-scope { position: absolute; pointer-events: none; border: 2px solid rgba(125,255,176,.7); border-radius: 50%; box-sizing: border-box; overflow: hidden;
-  background: radial-gradient(ellipse at center, transparent 0 32%, rgba(125,255,176,.22) 32.5% 33.3%, transparent 34% 65%, rgba(125,255,176,.18) 65.5% 66.3%, transparent 67%),
-    linear-gradient(rgba(125,255,176,.25), rgba(125,255,176,.25)) center / 1px 100% no-repeat, linear-gradient(90deg, rgba(125,255,176,.25), rgba(125,255,176,.25)) center / 100% 1px no-repeat;
-  box-shadow: 0 0 8px rgba(125,255,176,.35), inset 0 0 12px rgba(125,255,176,.15); }
+/* cockpit aiming scope: a plain green circle (sized and placed from js) */
+.aim-scope { position: absolute; pointer-events: none; border: 2px solid rgba(125,255,176,.75); border-radius: 50%; box-sizing: border-box; }
 .aim-scope[hidden] { display: none; }
-.aim-scope.alert { border-color: rgba(255,80,80,.8); box-shadow: 0 0 8px rgba(255,80,80,.4), inset 0 0 12px rgba(255,80,80,.15); }
-.aim-sweep { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, rgba(125,255,176,.28), rgba(125,255,176,0) 60deg, transparent 360deg); animation: aimSweep 2.4s linear infinite; }
-@keyframes aimSweep { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .aim-sweep { animation: none; opacity: 0; } }
 .fire-btn { right: auto; left: 50%; transform: translateX(-50%); bottom: calc(40px + env(safe-area-inset-bottom)); background: rgba(240,120,30,.6); }
 .fire-btn.on { background: rgba(255,170,60,.95); }
 #rebuildBtn { width: 100%; margin-top: 8px; }

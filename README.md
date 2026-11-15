@@ -220,14 +220,14 @@ crosshair sits in front of the character on the line from its eyes to that targe
 ahead of the dragon rider's, and the character aims from its eyes through the crosshair to the target (in the chase and
 side views it shows near the head, not at the screen centre). In the cockpit view the eyes are the camera, so the
 crosshair is centred, but it lags the movement a little (about 0.15 s): turning, climbing or sidestepping fast shifts it
-off centre and it settles back; the aim goes through it as drawn. The cockpit view also shows the aiming scope, a green
-radar ring (3.5° radius) around the line of sight. Looking around (dragging the screen) is limited to how far the
+off centre and it settles back; the aim goes through it as drawn. The cockpit view also shows the aiming scope, a plain
+green circle (3.5° radius) around the aim. Looking around (dragging the screen) is limited to how far the
 character's head can turn from where the body faces: the Gundam's head 60° to either side, 30° up and 30° down, the
 dragon's 35°, 30° and 25°, and never so far that the scope leaves the screen. The aim stays within the weapon's reach (25°
-to either side, 20° up, 15° down): looking further, the crosshair and ring stop at that edge (and turn red) while the view
+to either side, 20° up, 15° down): looking further, the crosshair and circle stop at that edge while the view
 turns on, and shots go along the held aim, to the target under the crosshair. The crosshair never leaves the ring: its lag is limited, and whatever moves it, it is held at the ring's edge (the aim
 goes through it as drawn), so every beam and fireball goes to the target under
-the crosshair (the crosshair would turn red if it ever could not). The cockpit
+the crosshair. The cockpit
 view tilts with at most 12° of the body lean.
 Fire (F, left click, gamepad RB/X, or the FIRE button on touch screens).
 * **Gundam - beam rifle:** the right arm swings up to aim along the crosshair (the arm and rifle are a separate part pivoted at
