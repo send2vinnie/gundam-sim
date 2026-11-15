@@ -1845,7 +1845,9 @@ void main() {
       const saved = fly.dHead; if (saved) fly.dHead = { yaw: saved.yaw, pitch: saved.pitch - (fly.dHeadFa || 0), tilt: saved.tilt };
       const hd = dragonHeadDir(); fly.dHead = saved;
       const toT = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, from, new C.Cartesian3()), new C.Cartesian3());
-      if (C.Cartesian3.angleBetween(hd, toT) > 2 * DEG) {   // out of the neck's reach: the fireball goes where the head points
+      // out of the neck's reach: the fireball goes where the head points (a head that has aimed is within a few degrees, also
+      // with the walking nod, so the margin is wide: an aimed fireball always goes to the crosshair target)
+      if (C.Cartesian3.angleBetween(hd, toT) > 6 * DEG) {
         const ray = new C.Ray(from, hd); const h = cpuRay(ray, W.range + 200, false);
         fly.fireTarget = h ? h.position : C.Cartesian3.add(from, C.Cartesian3.multiplyByScalar(hd, h === null ? C.Cartesian3.distance(from, fly.fireTarget) : W.range, new C.Cartesian3()), new C.Cartesian3());
         fly.fireHit = h ? { position: h.position, cpu: true } : null;
@@ -2004,7 +2006,8 @@ void main() {
     const k = (fly.walking ? 1 : 0) * Math.min(1, fly.gait || 0) * (fly.walkBlend || 0);
     if (state.mode !== "fly" || k < 0.01) return;
     const dragon = fly.character === "dragon", run = fly.gaitRun || 0, ph = fly.walkPhase || 0, inside = CAMS[fly.cam].range === 0, out = inside ? 1 : 0.3;
-    const roll = (dragon ? 1.6 + 1.2 * run : 2.5 + 2 * run) * DEG * Math.sin(ph) * k * out;
+    // (the Gundam's cockpit roll is calmer: 1.5 deg walking, 2.7 running; outside views keep a third of the full amount)
+    const roll = (dragon ? 1.6 + 1.2 * run : inside ? 1.5 + 1.2 * run : 2.5 + 2 * run) * DEG * Math.sin(ph) * k * out;
     const dip = (dragon ? 0.08 + 0.06 * run : 0.35 + 0.25 * run) * Math.pow(Math.abs(Math.sin(ph)), 4) * k * out;   // footfalls at sin = +-1
     // cockpit only: the view also nods down at each footfall and comes back up (a heavier nod for the Gundam)
     const nod = inside ? (dragon ? 1.2 + 0.8 * run : 2 + 1.5 * run) * DEG * Math.pow(Math.abs(Math.sin(ph)), 4) * k : 0;
