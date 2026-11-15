@@ -1394,7 +1394,11 @@ void main() {
     // body attitude: lean into motion, bank into turns (only when airborne)
     const air = fly.grounded ? 0.15 : 1;
     // lean forward with speed, back when climbing and forward when diving
-    const targetLean = ((fly.vf / (MAX_FWD * BOOST)) * CH().leanMax - (fly.vu / (MAX_VERT * 1.8)) * 18) * DEG * air;
+    // the Gundam leans clearly into flight: 15 deg hovering, about 35 deg at slow cruise, 45 deg at full speed, 60 deg on boost
+    const fwdT = Math.max(0, Math.min(1, fly.vf / MAX_FWD)), boostT = Math.max(0, Math.min(1, (fly.vf - MAX_FWD) / (MAX_FWD * (BOOST - 1))));
+    const leanFwd = fly.character === "dragon" ? (fly.vf / (MAX_FWD * BOOST)) * CH().leanMax
+      : fly.grounded ? (fly.vf / (MAX_FWD * BOOST)) * CH().leanMax : 15 + 30 * Math.sqrt(fwdT) + 15 * boostT - (fly.vf < 0 ? 10 * Math.min(1, -fly.vf / MAX_BACK) : 0);
+    const targetLean = (leanFwd - (fly.vu / (MAX_VERT * 1.8)) * 18) * DEG * air;
     const targetBank = settings.difficulty === "hard" ? (fly.bankH || 0) * air + (fly.vs / MAX_STRAFE) * 8 * DEG * air
       : (fly.yawRate / TURN_RATE) * 22 * DEG * air + (fly.vs / MAX_STRAFE) * 12 * DEG * air;
     const k = 1 - Math.exp(-dt * 3);
@@ -1414,7 +1418,7 @@ void main() {
     const kh = 1 - Math.exp(-dt * 5);
     const turn = Math.max(-1, Math.min(1, fly.yawRate / TURN_RATE + 0.35 * fly.vs / MAX_STRAFE));
     fly.headYaw = (fly.headYaw || 0) + (turn * 30 * DEG - (fly.headYaw || 0)) * kh;
-    const headUp = fly.character === "dragon" ? 0 : (FLIGHT_POSE.head + Math.min(25 * DEG, Math.max(0, fly.lean) * 0.4)) * (fly.flyPose || 0);   // keep looking ahead when leaning
+    const headUp = fly.character === "dragon" ? 0 : Math.min(70 * DEG, FLIGHT_POSE.head + Math.max(0, fly.lean)) * (fly.flyPose || 0);   // the neck takes back the whole lean: the face looks along the flight path
     fly.headPitch = (fly.headPitch || 0) + (Math.max(-1, Math.min(1, fly.vu / MAX_VERT)) * 12 * DEG + headUp - (fly.headPitch || 0)) * kh;
     if (PROF) tp = PROF.add("flight:physics", tp);
     if (fly.model) {
@@ -1749,14 +1753,13 @@ void main() {
   }
   // Flight pose (radians; swing about the joint's x axis, negative = forward; abd about the forward axis, + = to its left):
   // a reference figure photo of the RX-78 flying toward the camera, torso leaning in. Rifle arm forward and a little out,
-  // (the shield arm is also turned about its own axis so the shield face looks forward)
-  // the rifle held level ahead at chest height; shield arm raised forward and out so the shield stands up beside the
-  // head; right leg forward with the knee sharply bent and the shin hanging under it; left leg trailing back and out,
-  // knee slightly bent, foot pointed. Arm angles follow the body lean so the rifle and shield keep their place in the world.
+  // the rifle raised ahead at shoulder height (this arm follows the body lean, so the rifle keeps its aim in the world);
+  // shield arm down at its side, swung a little back with the armpit open 30 deg, shield face out (relative to the torso);
+  // both legs trailing back and out, stretched, knees slightly bent and feet pointed (the right a touch less: no stiff mirror).
   const FLIGHT_POSE = {
-    head: 6 * DEG,
-    armR: { reach: 75 * DEG, max: 120 * DEG, abd: -18 * DEG }, armL: { reach: 60 * DEG, max: 100 * DEG, abd: 30 * DEG, twist: -60 * DEG },
-    thighR: [-70 * DEG, -6 * DEG], shinR: 75 * DEG, footR: 18 * DEG,
+    head: 8 * DEG,
+    armR: { reach: 105 * DEG, max: 165 * DEG, abd: -18 * DEG }, armL: { back: 15 * DEG, abd: 30 * DEG, twist: 0 },
+    thighR: [18 * DEG, -9 * DEG], shinR: 22 * DEG, footR: 33 * DEG,
     thighL: [22 * DEG, 12 * DEG], shinL: 28 * DEG, footL: 38 * DEG
   };
   const scratchPoseM3 = new C.Matrix3(), scratchPoseZ = new C.Matrix3(), scratchPoseY = new C.Matrix3();
@@ -1766,7 +1769,8 @@ void main() {
     if (twist) C.Matrix3.multiply(scratchPoseM3, C.Matrix3.fromRotationY(twist, scratchPoseY), scratchPoseM3);
     node.matrix = C.Matrix4.fromRotationTranslation(scratchPoseM3, new C.Cartesian3(t[0], t[1], t[2]), node.matrix ? C.Matrix4.clone(node.matrix) : new C.Matrix4());
   }
-  const armReach = (a) => -Math.min(a.max, a.reach + Math.max(0, fly.lean)) * (fly.flyPose || 0);   // shoulder swing for the flight pose
+  // shoulder swing for the flight pose: "reach" arms follow the body lean (fixed in the world), "back" arms stay relative to the torso
+  const armReach = (a) => (a.back !== undefined ? a.back : -Math.min(a.max, a.reach + Math.max(0, fly.lean))) * (fly.flyPose || 0);
   function setLeg(node, name, ang) { const t = LEG_NODES[name]; node.matrix = C.Matrix4.fromRotationTranslation(C.Matrix3.fromRotationX(ang, scratchLegM3), new C.Cartesian3(t[0], t[1], t[2]), node.matrix ? C.Matrix4.clone(node.matrix) : new C.Matrix4()); }
   function updateGait(dt, speed, WK) {
     // gait: 0 standing .. 1 walking, gaitRun 0 walk .. 1 run; the phase advances with the distance covered
