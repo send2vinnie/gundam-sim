@@ -1866,6 +1866,13 @@ void main() {
   }
   // shoulder swing for the flight pose: "reach" arms follow the body lean (fixed in the world), "back" arms stay relative to the torso
   const armReach = (a) => (a.back !== undefined ? a.back : -Math.min(a.max, a.reach + Math.max(0, fly.lean))) * (fly.flyPose || 0);
+  // ankles while walking (radians, + = toes down): the foot stretches (toes pointed) as it pushes off at the end of each
+  // step and is lifted, and flattens with the toes up a little as the heel comes down; stronger when running. The gait
+  // phase p: the leg is furthest forward at sin(p) = 1 (heel strike) and furthest back at sin(p) = -1 (push-off).
+  function ankleFlex(p, g, r, k) {
+    const near = (c, w) => { const d = Math.atan2(Math.sin(p - c), Math.cos(p - c)); return Math.exp(-(d * d) / (2 * w * w)); };
+    return k * g * ((18 + 12 * r) * DEG * near(1.5 * Math.PI + 0.35, 0.45) - (8 + 6 * r) * DEG * near(0.5 * Math.PI + 0.1, 0.35));
+  }
   // walking arm pose (radians; + = back for the upper arm, - = forearm forward/up at the elbow), from the gait phase:
   // a backward bias of the upper arms, and an elbow bend that grows on each arm's forward swing and when running
   function walkArms(ph, g, r) {
@@ -1899,7 +1906,7 @@ void main() {
       let st = 0; if (fly.stumbleT > 0) st = Math.sin(Math.min(1, (1.2 - fly.stumbleT) / 0.5) * Math.PI / 2) * Math.min(1, fly.stumbleT / 0.5);
       const wb = fly.walkBlend || 0;
       const leg = (p) => { const swing = -A * Math.sin(p) - 30 * DEG * st, knee = 4 * DEG * g + K * Math.pow(Math.max(0, Math.cos(p)), 1.5) + 60 * DEG * st;
-        return [-lean * wb + swing, knee, -(swing + knee) * 0.85]; };
+        return [-lean * wb + swing, knee, -(swing + knee) * 0.85 + ankleFlex(p, g, r, 0.6)]; };
       fly.dragonLegs = leg(ph).concat(leg(ph + Math.PI));
       fly.armSwing = 0;
       fly.bob = fly.bob || 0;   // set where the model is placed
@@ -1910,7 +1917,7 @@ void main() {
       const A = (22 + 16 * r) * DEG * g, K = (35 + 40 * r) * DEG * g;
       let st = 0; if (fly.stumbleT > 0) st = Math.sin(Math.min(1, (1.2 - fly.stumbleT) / 0.5) * Math.PI / 2) * Math.min(1, fly.stumbleT / 0.5);   // stumble: knees give way, then recover
       const leg = (p) => { const hip = -A * Math.sin(p) - 32 * DEG * st, knee = 4 * DEG * g + K * Math.pow(Math.max(0, Math.cos(p)), 1.5) + 64 * DEG * st;
-        return { hip, knee, foot: -(hip + knee) * 0.85 }; };
+        return { hip, knee, foot: -(hip + knee) * 0.85 + ankleFlex(p, g, r, 1) }; };
       const L = leg(ph), R = leg(ph + Math.PI);
       if (legs) {
         // flight pose blended in while airborne (fp = 0 on the ground, so walking is unchanged)

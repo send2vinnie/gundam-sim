@@ -189,6 +189,9 @@ lurch forward, no control), then it walks.
 * **Speeds:** the Gundam walks at 4.5 m/s and runs at 12 m/s (Boost), backs up at 2.5 m/s, sidesteps at 3 m/s and turns at
   50°/s; the dragon walks at 2 m/s, runs at 6 m/s, backs up at 1.2 m/s, sidesteps at 1.2 m/s and turns at 90°/s. Running on
   foot does not use the Hard BOOST gauge.
+* **Ankles:** each foot stretches (heel up, toes pointed, about 18° walking, 30° running) as it pushes off at the end of a
+  step, and lands with the toes slightly up before flattening as it takes the weight; the dragon does the same, more
+  subtly.
 * **Feet on the surface:** the feet follow the street or roof and step smoothly up and down small ledges (up to 3 m for the
   Gundam, 0.8 m for the dragon). Anything taller is a wall and blocks you. Walking off a higher edge (more than 4 m / 1.5 m)
   drops you into flight. Up (Space, RT, right stick up) jumps and takes off.
