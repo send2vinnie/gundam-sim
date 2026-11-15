@@ -250,7 +250,7 @@ plaza rather than a roof. Move it by editing `LOBBY` in `js/app.js`.
 * `models/*_med.glb`, `models/*_low.glb` Medium and Low detail versions of both Gundam models
 * `models/pilot_*.glb` five pilot poses
 * `models/dragon_stand.glb`, `models/trainer_stand.glb` start-screen dragon (wing joints) and trainer (right-arm joint), built by `tools/build_lobby_actors.js`
-* `models/dragon.glb` dragon in flight attitude with an 11-joint rig (body, head, wings, tail, and hip/knee/ankle per leg) and its rider (built by `tools/build_dragon_rider.js`; the leg joints are added by `tools/build_dragon_legs.js`) Its teeth ride on the head joint, and its front arms, hands and hand claws on the body (they were weighted to the wings and came loose when the head turned or the wings beat); `tools/fix_dragon_parts.js` sets this, for `models/dragon_stand.glb` too.
+* `models/dragon.glb` dragon in flight attitude with an 11-joint rig (body, head, wings, tail, and hip/knee/ankle per leg) and its rider (built by `tools/build_dragon_rider.js`; the leg joints are added by `tools/build_dragon_legs.js`) Its teeth ride on the head joint, and its whole front arms (shoulders, elbows, hands) and hand claws on the body, so they stay steady while the wings beat (they were weighted to the wings); `tools/fix_dragon_parts.js` sets this, for `models/dragon_stand.glb` too.
 * `js/app.js` simulator (start-screen location and Tokyo starting points at the top), `sw.js` + `manifest.webmanifest` app install
 
 ## Credits

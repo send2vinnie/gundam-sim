@@ -4,9 +4,9 @@
 // takes the skin weights of the nearest vertex of the dragon's body mesh (material "dracaufeulambert2SG") to the part's
 // base (its vertex closest to that surface), for all its vertices, so it moves rigidly with that spot: teeth with the
 // head, hand claws with the hands, foot claws with the ankles. Only JOINTS_0/WEIGHTS_0 change, in place.
-// First, the front arms and hands (dragon.glb and the start screen's dragon_stand.glb): they were weighted mostly to the wings, so the hands flapped with
-// every wing beat. They now ride on the body joint (blended back to the old weights over the last 0.6 units toward the
-// wing roots, so the shoulders stay smooth).
+// First, the front arms (dragon.glb and the start screen's dragon_stand.glb), shoulder to hand: they were weighted mostly to the
+// wings, so the elbows and hands flapped with every wing beat. They now ride on the body joint (blended back to the old
+// weights toward the wing roots, so the shoulders stay smooth). Run it on the models as they were before this tool.
 // usage: node tools/fix_dragon_parts.js models/dragon.glb [models/dragon_stand.glb]
 const fs = require("fs");
 const NC = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }, CS = { 5126: 4, 5125: 4, 5123: 2, 5121: 1 };
@@ -34,8 +34,13 @@ function fix(file) {
   if (bodyJ >= 0) {
     const BX = A(body.attributes.JOINTS_0), BWX = A(body.attributes.WEIGHTS_0); let n = 0;
     BP.forEach((v0, i) => {
-      const v = toNative(v0), ax = Math.abs(v[0]); if (ax < 2.8 || ax > 7.5 || v[2] < 8.5 || v[2] > 13 || v[1] > 0.3 || v[1] < -3) return;
-      const t = v[1] <= -0.3 ? 1 : (0.3 - v[1]) / 0.6, w = BW[i].slice(), jt = BJ[i].slice();
+      // the whole front arm, shoulder to hand (upper arm, elbow, forearm, hand): beside the chest, in front of / below the
+      // wing roots. Blended out toward the back (y 1.0..1.5) and, behind the hands, up into the wing roots (z 11.5..12.3).
+      const v = toNative(v0), ax = Math.abs(v[0]); if (ax < 2.5 || ax > 7.5 || v[2] < 6.5 || v[2] > 13 || v[1] > 1.5 || v[1] < -3) return;
+      const ramp = (x, a, b) => Math.max(0, Math.min(1, (x - a) / (b - a)));
+      const t = ramp(1.5 - v[1], 0, 0.5) * (v[1] <= -0.3 ? 1 : ramp(12.3 - v[2], 0, 0.8)) * ramp(v[2], 6.5, 7);
+      if (t <= 0) return;
+      const w = BW[i].slice(), jt = BJ[i].slice();
       // body weight raised to t of the total, the rest scaled down
       let slot = jt.findIndex((x, k) => x === bodyJ && w[k] > 0); if (slot < 0) { slot = w.indexOf(Math.min(...w)); jt[slot] = bodyJ; w[slot] = 0; }
       const others = w.reduce((s, x, k) => s + (k === slot ? 0 : x), 0), keep = (1 - t) * (others + w[slot]) ;
