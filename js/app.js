@@ -1725,8 +1725,10 @@ void main() {
   const crosshairEl = $("crosshair");
   function updateCrosshair(dt) {
     updateAim(false, dt);
-    const w = fly.aimR && C.SceneTransforms.worldToWindowCoordinates(scene, fly.aimR), cv = scene.canvas;
+    let w = fly.aimR && C.SceneTransforms.worldToWindowCoordinates(scene, fly.aimR);
+    const cv = scene.canvas;
     if (!w) return;
+    clampCockpitCrosshair(w);
     fly.crosshairXY = [Math.max(16, Math.min(cv.clientWidth - 16, w.x)), Math.max(16, Math.min(cv.clientHeight - 16, w.y))];
     crosshairEl.style.left = fly.crosshairXY[0] + "px"; crosshairEl.style.top = fly.crosshairXY[1] + "px";
     // cockpit: the aiming scope, a green radar ring around the line of sight (a 3.5 deg radius, sized with the
@@ -1750,7 +1752,24 @@ void main() {
     crosshairEl.classList.toggle("out", out); scopeEl.classList.toggle("alert", out); fly.crosshairOut = out;
   }
   const scopeEl = $("aimScope");
-  const crosshairTarget = (gpuOk) => updateAim(gpuOk);
+  // cockpit: the crosshair as drawn never leaves the scope ring (whatever moved it: lag, turning, the view): it is held at
+  // the ring's edge, and the aim point and target are taken through the held position, so shots still go where it shows
+  function clampCockpitCrosshair(w) {
+    if (CAMS[fly.cam].range !== 0 || !camera.frustum || !camera.frustum.fovy) return w;
+    const cv = scene.canvas, cx = cv.clientWidth / 2, cy = cv.clientHeight / 2;
+    const r = (cv.clientHeight / 2) / Math.tan(camera.frustum.fovy / 2) * Math.tan(3.5 * DEG) * 0.97, d = Math.hypot(w.x - cx, w.y - cy);
+    if (d <= r) return w;
+    w.x = cx + (w.x - cx) * r / d; w.y = cy + (w.y - cy) * r / d;
+    const W = WEAPONS[fly.character || "gundam"], D = AIM_AHEAD[fly.character] || 5, ray = camera.getPickRay(new C.Cartesian2(w.x, w.y));
+    const R = C.Cartesian3.add(ray.origin, C.Cartesian3.multiplyByScalar(ray.direction, D, new C.Cartesian3()), new C.Cartesian3());
+    const h = cpuRay(new C.Ray(R, ray.direction), W.range + 200, false);
+    fly.aimR = R; fly.aimT = h ? C.Cartesian3.clone(h.position) : C.Cartesian3.add(R, C.Cartesian3.multiplyByScalar(ray.direction, fly.aimT ? Math.max(D, C.Cartesian3.distance(R, fly.aimT)) : W.range, new C.Cartesian3()), new C.Cartesian3());
+    fly.aimHit = h ? { position: fly.aimT, cpu: true } : null;
+    return w;
+  }
+  const crosshairTarget = (gpuOk) => { const a = updateAim(gpuOk);
+    if (CAMS[fly.cam].range === 0 && fly.aimR) { const w = C.SceneTransforms.worldToWindowCoordinates(scene, fly.aimR); if (w) { clampCockpitCrosshair(w); a.target = fly.aimT; a.hit = fly.aimHit; } }
+    return a; };
   function requestFire() {
     if (state.mode !== "fly" || !fly.model || fireCooldown > 0) return;
     const W = WEAPONS[fly.character || "gundam"]; fireCooldown = W.cooldown;
