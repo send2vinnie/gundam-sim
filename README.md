@@ -86,11 +86,13 @@ well forward as it flies (about 25° hovering, 45° at slow cruise, 55° at full
 the neck takes back the whole lean plus 15° (up to 80°) so the head looks up along the flight path, the rifle is
 carried low: the upper arm hangs down, a little forward and out (armpit open about 22°), the elbow bends so the
 forearm points forward, and the rifle is turned at the fist so its barrel stays exactly level along the heading at any
-lean. When you fire, the forearm lifts a little and the rifle turns at the fist to the crosshair target; until the shot
-leaves, the aim keeps following the crosshair (so turning while firing still hits what the crosshair is on). The beam
-leaves from the rifle's muzzle once the barrel points there (within 2°, usually under 0.1 s) and flies along the barrel
-to the point under the crosshair; the dragon's fireball also goes to the point under the crosshair when it leaves the
-mouth. On foot the arm is straight and swings up to aim as before, with the rifle lined up on the target the same way. Each beam kicks the hand up with recoil once it has left the muzzle (so the shot is never thrown off): the forearm
+lean. The rifle and the crosshair work as one in flight: the barrel points halfway between level along
+the heading and where the camera looks (at most 20° to the side and 15° up or down from level), and the crosshair is
+drawn every frame where the barrel's line meets the city (or at full range), with a faint aim line from the muzzle on
+Medium and High. So turning, climbing or looking around (mouse drag, right stick, drag on touch) moves the rifle and the
+crosshair together. Firing sends the beam at once from the muzzle along the barrel to the point the crosshair is on
+(measured: 0 px between the crosshair and the impact point, 0° between the barrel and the beam). The dragon's
+crosshair stays at the screen centre, and its fireball goes to the point under it. On foot the arm is straight and swings up to aim as before, with the rifle lined up on the target the same way. Each beam kicks the hand up with recoil once it has left the muzzle (so the shot is never thrown off): the forearm
 flexes about 10°, the shoulder lifts about 5° and the barrel pitches up about 16°, peaking at about 60 ms and easing
 back within about 300 ms; rapid shots stack a little (capped). Flying and on foot alike; the camera stays steady. The shield arm hangs at its side swung a little back with the armpit open 30° and the shield face out, and both
 legs trail back and out, stretched with the knees slightly bent and the feet pointed (the right a touch less than the
