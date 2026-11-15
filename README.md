@@ -199,6 +199,14 @@ racing out along the ground, a tall smoke-and-fire column rising and lingering f
 flash and a stronger, longer camera shake (if on). Nishi-Shinjuku towers (130 - 210 m) get all of it. Particle counts
 grow at most 2.2× per layer and are halved on Low (fewer secondaries too).
 
+## Building health
+Bigger buildings take more shots (a beam or a fireball is one hit either way): shots = round(1 + 2.5 (k - 0.4)), clamped
+1 - 12, with k = cube root of the volume / 22 m clamped to 0.4 - 5 (the same measure as the explosions, without the Low
+cap). A small house falls to 1 shot, mid-rises take 2 - 5, Nishi-Shinjuku towers 10 - 12. A hit that does not bring it
+down leaves a scorch burst and smoke at the hit point; past half its health the building darkens (to 55% at the last hit
+before it falls) and smokes longer from each hit. The last hit sets off the size-scaled explosion. **Rebuild city**
+resets health and damage.
+
 ## Walking mode
 A slow touchdown on the street or on a roof switches to walking (the HUD shows **WALK**, **RUN** or **STUMBLE**). In Easy and
 Medium a fast touchdown skims along the ground (LANDED) and switches to walking once it has slowed to about 18 m/s (Gundam) or

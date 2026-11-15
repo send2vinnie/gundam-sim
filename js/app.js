@@ -1747,7 +1747,7 @@ void main() {
     return null;
   }
   function blastOf(obj, pos) { const z = buildingSize(obj, pos); return { k: z ? blastK(Math.max(2, z.w) * Math.max(2, z.d) * Math.max(2, z.h)) : 1, z }; }
-  function destroyAt(hit) {
+  function destroyAt(hit, blast) {
     const obj = hit.object, pos = hit.position;
     // PLATEAU buildings are skipped by feature id in the CPU queries; elsewhere (OSM) queries near the spot
     // use the GPU pick, which sees what is actually drawn
@@ -1755,23 +1755,58 @@ void main() {
     if (obj instanceof C.Cesium3DTileFeature) {             // PLATEAU building: hide it (and keep it hidden when its tile reloads)
       const url = obj.content && obj.content.url; const id = obj.featureId;
       setTimeout(() => { try { obj.show = false; } catch (e) { /* tile unloaded */ } }, 350);
-      const b = blastOf(obj, pos);   // (measured before the building is marked destroyed)
+      const b = blast || blastOf(obj, pos);   // (measured before the building is marked destroyed)
       if (url !== undefined) { if (!hiddenFeatures.has(url)) hiddenFeatures.set(url, new Set()); hiddenFeatures.get(url).add(id); }
       collapse(pos, b.k, b.z); return;
     }
     if (obj && obj.primitive && typeof obj.id === "string" && obj.id.startsWith("osm-")) { // OSM building (Nangang)
       try { obj.primitive.getGeometryInstanceAttributes(obj.id).show = C.ShowGeometryInstanceAttribute.toValue(false); hiddenOsm.add(obj.id); } catch (e) { /* ignore */ }
-      { const b = blastOf(obj, pos); collapse(pos, b.k, b.z); } return;
+      { const b = blast || blastOf(obj, pos); collapse(pos, b.k, b.z); } return;
     }
   }
+  // Building health: bigger buildings take more shots (beam or fireball alike, one hit each). From the size factor (the
+  // same cube-root-of-volume measure as the blast, here without the Low cap): shots = round(1 + 2.5 (k - 0.4)), 1..12, with
+  // k = cbrt(volume) / 22 m clamped to 0.4..5: a small house 1, a mid-rise 3-5, the biggest towers 11-12. A hit that does not
+  // bring it down leaves a small scorch burst and smoke at the hit point; past half its health the building darkens and
+  // smokes from each hit for longer. The last hit sets off the size-scaled explosion. Rebuild city resets all of it.
+  const shotsFor = (z) => { if (!z) return 1; const k = Math.max(0.4, Math.min(5, Math.cbrt(Math.max(2, z.w) * Math.max(2, z.d) * Math.max(2, z.h)) / BLAST_REF));
+    return Math.max(1, Math.min(12, Math.round(1 + 2.5 * (k - 0.4)))); };
+  const buildingHp = new Map();   // key (tile url + feature id, or OSM id) -> { hits, need, blast, url, id }
+  const hpKey = (obj) => obj instanceof C.Cesium3DTileFeature ? (obj.content && obj.content.url) + "#" + obj.featureId : typeof obj.id === "string" && obj.id.startsWith("osm-") ? obj.id : null;
+  function damageShade(e, obj) {   // darken a damaged building (past half its health), down to 55% at the last hit before it falls
+    const u = e.hits / e.need; if (u < 0.5) return;
+    const g = 1 - 0.45 * Math.min(1, (u - 0.5) / 0.5), col = new C.Color(g, g * 0.95, g * 0.9, 1);
+    try { if (obj instanceof C.Cesium3DTileFeature) obj.color = col; else obj.primitive.getGeometryInstanceAttributes(obj.id).color = C.ColorGeometryInstanceAttribute.toValue(C.Color.multiply(C.Color.fromCssColorString("#b9b6ae"), col, new C.Color())); } catch (er) { /* unloaded */ }
+    e.color = col;
+  }
+  function damageAt(hit) {
+    const obj = hit && hit.object, key = obj && hpKey(obj); if (!key) return false;
+    let e = buildingHp.get(key);
+    if (!e) { const b = blastOf(obj, hit.position); e = { hits: 0, need: shotsFor(b.z), blast: b, url: obj.content && obj.content.url, id: obj.featureId, key }; buildingHp.set(key, e); }
+    e.hits++;
+    if (e.hits >= e.need) { buildingHp.delete(key); destroyAt(hit, e.blast); return true; }
+    // a hit that does not bring it down: a scorch burst and smoke at the hit point, scaled lightly with the building
+    const pos = hit.position, k = Math.sqrt(e.blast.k), heavy = e.hits / e.need >= 0.5;
+    burst(pos, { inner: "rgba(60,55,50,1)", outer: "rgba(35,32,30,1)", c0: "#3c3732", c1: "rgba(30,28,26,0)", n: 14, v0: 2, v1: 9 * k, life: 1.2, px: 0.9 * k, s0: 1, s1: 1, radius: 1, gravity: 9.8 });
+    burst(pos, { inner: "rgba(90,85,80,0.85)", outer: "rgba(55,52,50,0.5)", c0: "rgba(85,80,75,0.75)", c1: "rgba(45,45,45,0)", n: heavy ? 18 : 10, v0: 0.5, v1: 2.5 * k, life: heavy ? 5 : 2.5, px: 5 * k, s0: 1, s1: heavy ? 5 : 3, radius: 1.5 * k, gravity: heavy ? -1.5 : -0.5 });
+    damageShade(e, obj);
+    lastHit = { hits: e.hits, need: e.need, k: +e.blast.k.toFixed(2) };   // for tests
+    return false;
+  }
+  let lastHit = null;
   function reapplyHidden(tile) {
+    const url = tile && tile.content && tile.content.url;
+    for (const e of buildingHp.values()) if (e.color && e.url === url) { try { if (e.id < tile.content.featuresLength) tile.content.getFeature(e.id).color = e.color; } catch (er) { /* ignore */ } }   // damage shading
     const set = tile && tile.content && hiddenFeatures.get(tile.content.url); if (!set) return;
     for (const id of set) { try { if (id < tile.content.featuresLength) tile.content.getFeature(id).show = false; } catch (e) { /* ignore */ } }
   }
   function rebuildCity() {
     for (const ts of tilesets) {
       // show every feature of loaded tiles again
-      try { ts.root && (function walk(t) { if (t.content && t.content.featuresLength) for (let i = 0; i < t.content.featuresLength; i++) t.content.getFeature(i).show = true; (t.children || []).forEach(walk); })(ts.root); } catch (e) { /* ignore */ } }
+      try { ts.root && (function walk(t) { if (t.content && t.content.featuresLength) for (let i = 0; i < t.content.featuresLength; i++) { const ft = t.content.getFeature(i); ft.show = true; ft.color = C.Color.WHITE; } (t.children || []).forEach(walk); })(ts.root); } catch (e) { /* ignore */ } }
+    // health and damage shading reset too
+    if (localWorld && localWorld.osmPrimitive) for (const e of buildingHp.values()) if (!e.url && e.key) { try { localWorld.osmPrimitive.getGeometryInstanceAttributes(e.key).color = C.ColorGeometryInstanceAttribute.toValue(C.Color.fromCssColorString("#b9b6ae")); } catch (er) { /* ignore */ } }
+    buildingHp.clear();
     hiddenFeatures.clear();
     if (localWorld && localWorld.osmPrimitive) for (const id of hiddenOsm) { try { localWorld.osmPrimitive.getGeometryInstanceAttributes(id).show = C.ShowGeometryInstanceAttribute.toValue(true); } catch (e) { /* ignore */ } }
     hiddenOsm.clear(); destroyedSpots.length = 0;
@@ -2052,7 +2087,7 @@ void main() {
         let hit = impact ? impact.hit : s.hit; const kind = impact ? impact.kind : s.hit ? "aimed" : "air";
         explode(s.pos, s.dragon && kind !== "air");
         if (hit && hit.cpu) hit = identifyHit(s.pos, s.dir);   // found on the CPU: one GPU pick to know which building it is
-        if (hit) destroyAt(hit);
+        if (hit) damageAt(hit);
         shotLog.push({ kind, dragon: s.dragon, from: s.from, dir: C.Cartesian3.clone(s.dir), travelled: s.travelled }); if (shotLog.length > 200) shotLog.shift();
       }
     }
@@ -2495,7 +2530,7 @@ void main() {
   }
 
   // expose for debugging / automated tests
-  window.GFS = { FLIGHT_POSE, KNEEL_POSE, DRAGON_REST, aimEye, get aim() { return { eye: aimEye(), R: fly.aimR, T: fly.aimT, xy: fly.crosshairXY, out: !!fly.crosshairOut }; }, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, get lastBlast() { return lastBlast; }, buildingSize, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
+  window.GFS = { FLIGHT_POSE, KNEEL_POSE, DRAGON_REST, aimEye, get aim() { return { eye: aimEye(), R: fly.aimR, T: fly.aimT, xy: fly.crosshairXY, out: !!fly.crosshairOut }; }, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, get lastBlast() { return lastBlast; }, get lastHit() { return lastHit; }, buildingSize, damageAt, shotsFor, buildingHp, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
 
   (async () => {
     $("startBtn").disabled = true; $("startBtn").textContent = "Loading…";
