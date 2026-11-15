@@ -1677,10 +1677,48 @@ void main() {
     flash(pos, "rgba(255,240,200,0.95)", 90 * k, 0.18);
     if (settings.camShake) { const d = C.Cartesian3.distance(camera.positionWC, pos); shake = Math.max(shake, Math.min(big ? 0.8 : 0.6, (big ? 60 : 30) / Math.max(30, d))); }   // only with "Camera shake" on (off by default): the view stays still on impacts
   }
-  function collapse(pos) { // dust cloud and falling debris where a building came down
-    burst(pos, { inner: "rgba(200,190,170,0.9)", outer: "rgba(150,140,125,0.6)", c0: "rgba(190,180,160,0.85)", c1: "rgba(150,140,125,0)", n: 60, v0: 2, v1: 8, life: 4.5, px: 18, s0: 1, s1: 5, radius: 15 });
-    burst(pos, { inner: "rgba(90,85,80,1)", outer: "rgba(70,65,60,1)", c0: "#5a544c", c1: "rgba(60,55,50,0)", n: 50, v0: 3, v1: 14, life: 3.0, px: 1.8, s0: 1, s1: 1, radius: 10, gravity: 9.8 });
+  // Building destruction scales with the building: k from the cube root of its volume (width x depth x height, metres)
+  // against a 22 m cube (k = 1), clamped to 0.4 (a small house: a small pop) .. 4.5 (a skyscraper: a huge blast; 3 on
+  // Low, where big sprites cost too much fill on phones). Sizes
+  // (fireball, smoke, dust cloud, debris spread), duration, flash and camera shake grow with k; particle counts grow only
+  // up to 2.2x (and are halved on Low by FX_SCALE), so a tower costs little more than a house.
+  const BLAST_REF = 22, BLAST_MAX = LOW_GFX ? 3 : 4.5, blastK = (vol) => Math.max(0.4, Math.min(BLAST_MAX, Math.cbrt(Math.max(1, vol)) / BLAST_REF));
+  function collapse(pos, k) { // fireball, smoke, dust cloud and falling debris where a building came down
+    k = k || 1; const nk = Math.min(2.2, k), lk = 0.75 + 0.25 * k;   // particle count and duration factors
+    burst(pos, { inner: "rgba(255,255,230,1)", outer: "rgba(255,140,30,1)", c0: "rgba(255,205,120,1)", c1: "rgba(190,50,0,0)", n: 40 * nk, v0: 4 * k, v1: 18 * k, life: 1.4 * lk, px: 8 * k, s0: 1, s1: 3.5, radius: 3 * k });
+    burst(pos, { inner: "rgba(95,90,85,0.9)", outer: "rgba(60,58,55,0.6)", c0: "rgba(95,90,85,0.8)", c1: "rgba(55,55,55,0)", n: 24 * nk, v0: 2 * k, v1: 7 * k, life: 3.5 * lk, px: 14 * k, s0: 1, s1: 4.5, radius: 6 * k });
+    burst(pos, { inner: "rgba(200,190,170,0.9)", outer: "rgba(150,140,125,0.6)", c0: "rgba(190,180,160,0.85)", c1: "rgba(150,140,125,0)", n: 60 * nk, v0: 2 * k, v1: 8 * k, life: 4.5 * lk, px: 18 * k, s0: 1, s1: 5, radius: 15 * k });
+    burst(pos, { inner: "rgba(90,85,80,1)", outer: "rgba(70,65,60,1)", c0: "#5a544c", c1: "rgba(60,55,50,0)", n: 50 * nk, v0: 3 * k, v1: 14 * k, life: 3.0 * lk, px: 1.8 * Math.sqrt(k), s0: 1, s1: 1, radius: 10 * k, gravity: 9.8 });
+    flash(pos, "rgba(255,230,180,0.95)", 110 * k, 0.15 + 0.1 * k);
+    if (settings.camShake) { const d = C.Cartesian3.distance(camera.positionWC, pos); shake = Math.max(shake, Math.min(0.3 + 0.25 * k, 40 * k / Math.max(30, d))); }
+    lastBlast = { k, pos: C.Cartesian3.clone(pos) };   // for tests
   }
+  let lastBlast = null;
+  // size of a destroyed building (metres): PLATEAU, from its own triangles in the tile's triangle grid (else its measured
+  // height attribute); OSM, from its footprint and height. Width/depth are along east/north at the hit, height along up.
+  function buildingSize(obj, pos) {
+    const up = C.Cartesian3.normalize(pos, new C.Cartesian3()), enu = C.Transforms.eastNorthUpToFixedFrame(pos), east = C.Matrix4.getColumn(enu, 0, new C.Cartesian4()), north = C.Matrix4.getColumn(enu, 1, new C.Cartesian4());
+    if (obj instanceof C.Cesium3DTileFeature) {
+      const content = obj.content; let g = triGrids.get(content);
+      if (g === undefined) { try { g = buildTriGrid(content); } catch (e) { g = false; } if (g !== null) triGrids.set(content, g); }
+      if (g) { const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity], id = obj.featureId, T = g.T, o = g.o; let n = 0;
+        for (let t = 0; t < g.F.length; t++) { if (g.F[t] !== id) continue; n++;
+          for (let v = 0; v < 3; v++) { const b = t * 9 + v * 3, x = T[b] + o[0] - pos.x, y = T[b + 1] + o[1] - pos.y, z = T[b + 2] + o[2] - pos.z;
+            const p = [x * east.x + y * east.y + z * east.z, x * north.x + y * north.y + z * north.z, x * up.x + y * up.y + z * up.z];
+            for (let a = 0; a < 3; a++) { if (p[a] < mn[a]) mn[a] = p[a]; if (p[a] > mx[a]) mx[a] = p[a]; } } }
+        if (n) return { w: mx[0] - mn[0], d: mx[1] - mn[1], h: mx[2] - mn[2] }; }
+      for (const key of ["bldg:measuredHeight", "measuredHeight", "計測高さ", "height"]) { try { const h = +obj.getProperty(key); if (h > 0) return { w: Math.max(8, h * 0.6), d: Math.max(8, h * 0.6), h }; } catch (e) { /* no such attribute */ } }
+      return null;
+    }
+    if (typeof obj.id === "string" && obj.id.startsWith("osm-") && localWorld && localWorld.osm) {
+      const f = localWorld.osm.features[+obj.id.slice(4)]; if (!f) return null;
+      const ring = f.geometry.coordinates[0], lat0 = ring[0][1] * DEG; let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const [lo, la] of ring) { const x = lo * DEG * 6371000 * Math.cos(lat0), y = la * DEG * 6371000; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      return { w: x1 - x0, d: y1 - y0, h: (f.properties.h || 10) - (f.properties.mh || 0) };
+    }
+    return null;
+  }
+  function blastScale(obj, pos) { const z = buildingSize(obj, pos); return z ? blastK(Math.max(2, z.w) * Math.max(2, z.d) * Math.max(2, z.h)) : 1; }
   function destroyAt(hit) {
     const obj = hit.object, pos = hit.position;
     // PLATEAU buildings are skipped by feature id in the CPU queries; elsewhere (OSM) queries near the spot
@@ -1689,12 +1727,13 @@ void main() {
     if (obj instanceof C.Cesium3DTileFeature) {             // PLATEAU building: hide it (and keep it hidden when its tile reloads)
       const url = obj.content && obj.content.url; const id = obj.featureId;
       setTimeout(() => { try { obj.show = false; } catch (e) { /* tile unloaded */ } }, 350);
+      const k = blastScale(obj, pos);   // (measured before the building is marked destroyed)
       if (url !== undefined) { if (!hiddenFeatures.has(url)) hiddenFeatures.set(url, new Set()); hiddenFeatures.get(url).add(id); }
-      collapse(pos); return;
+      collapse(pos, k); return;
     }
     if (obj && obj.primitive && typeof obj.id === "string" && obj.id.startsWith("osm-")) { // OSM building (Nangang)
       try { obj.primitive.getGeometryInstanceAttributes(obj.id).show = C.ShowGeometryInstanceAttribute.toValue(false); hiddenOsm.add(obj.id); } catch (e) { /* ignore */ }
-      collapse(pos); return;
+      collapse(pos, blastScale(obj, pos)); return;
     }
   }
   function reapplyHidden(tile) {
@@ -2426,7 +2465,7 @@ void main() {
   }
 
   // expose for debugging / automated tests
-  window.GFS = { FLIGHT_POSE, KNEEL_POSE, DRAGON_REST, aimEye, get aim() { return { eye: aimEye(), R: fly.aimR, T: fly.aimT, xy: fly.crosshairXY, out: !!fly.crosshairOut }; }, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
+  window.GFS = { FLIGHT_POSE, KNEEL_POSE, DRAGON_REST, aimEye, get aim() { return { eye: aimEye(), R: fly.aimR, T: fly.aimT, xy: fly.crosshairXY, out: !!fly.crosshairOut }; }, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, get lastBlast() { return lastBlast; }, buildingSize, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
 
   (async () => {
     $("startBtn").disabled = true; $("startBtn").textContent = "Loading…";
