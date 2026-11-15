@@ -1039,7 +1039,7 @@ void main() {
       const gh = (p) => { const h = groundHeightAt(p.lon, p.lat, lobby.models); return h !== undefined && Math.abs(h - lobby.ground) < 1.5 ? h : lobby.ground; };
       const azTo = (a, b) => Math.atan2((b.lon - a.lon) * Math.cos(a.lat * DEG), b.lat - a.lat) / DEG;
       lobby.jump = { d: dp, t: tp, dh: gh(dp), th: gh(tp), dAz: azTo(dp, tp), tAz: azTo(tp, dp), time: 0 };
-      lobby.dragon = await loadModel("models/dragon_stand.glb", modelMatrixFor(dp.lat, dp.lon, lobby.jump.dh, lobby.jump.dAz), { scale: DRAGON_SCALE, maximumScale: undefined, distanceDisplayCondition: nearOnly() });
+      lobby.dragon = await loadModel("models/dragon_stand.glb", modelMatrixFor(dp.lat, dp.lon, lobby.jump.dh, lobby.jump.dAz), { scale: DRAGON_SCALE, maximumScale: undefined, distanceDisplayCondition: nearOnly(), cull: false });   // skinned: see the flight dragon
       lobby.trainer = await loadModel("models/trainer_stand.glb", modelMatrixFor(tp.lat, tp.lon, lobby.jump.th, lobby.jump.tAz), { scale: TRAINER_SCALE, maximumScale: undefined, distanceDisplayCondition: nearOnly() });
     } catch (e) { console.error(e); }
     refreshPickHighlight();
@@ -1354,7 +1354,10 @@ void main() {
     if (fly.rider) { scene.primitives.remove(fly.rider); fly.rider = null; }
     fly.character = ch; fly.headYaw = fly.headPitch = 0; fly.wingPhase = 0;
     if (ch === "dragon") {
-      fly.model = await loadModel("models/dragon.glb", C.Matrix4.IDENTITY, { scale: DRAGON_SCALE, maximumScale: undefined }); // rider included
+      // rider included. cull: false - the dragon and rider are one skinned mesh, and Cesium places a skinned primitive's
+      // culling volume from its bind pose (the native upright frame), not where the posed skeleton draws it: the rider's
+      // small volumes sat 5-6 m from the drawn rider, so from close or low camera angles it was culled while in plain view
+      fly.model = await loadModel("models/dragon.glb", C.Matrix4.IDENTITY, { scale: DRAGON_SCALE, maximumScale: undefined, cull: false });
     } else {
       const lvl = settings.modelDetail;
       fly.model = await loadModel(modelUrl("flight"), C.Matrix4.IDENTITY);
