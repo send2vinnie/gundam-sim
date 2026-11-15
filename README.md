@@ -81,10 +81,14 @@ Pick one on the start screen (**Character**), remembered between visits.
   the model with `node tools/build_dragon_rider.js <dragon folder> <trainer folder> models/dragon.glb <height>` followed by
   `node tools/build_dragon_legs.js models/dragon.glb`, so the rider stays 1.75 m.
 
-In flight the Gundam takes a superhero dive pose as it picks up forward speed: the body pitches forward (up to 68° at full
-boost), the head comes up to keep looking ahead, both arms reach forward and down (about 40° below the flight line, the shield
-arm a little less) and the legs trail behind with the knees bent (the left more than the right) and the feet pointed. It eases
-back to an upright hover when you slow down, land or walk; firing still raises the rifle arm to aim.
+Airborne, the Gundam holds a flight pose taken from a reference figure photo (an RX-78 action figure flying toward the
+camera): the rifle arm forward and a little out with the rifle held level ahead, the shield arm raised forward and out and
+turned so the shield face looks forward beside the head, the right leg forward with the knee sharply bent and the shin
+hanging under it, and the left leg trailing back and out with the foot pointed. The arm angles follow the body lean so the
+rifle and shield keep their place as the body pitches. It is set on the model's existing joints (head, both arms, hip, knee
+and ankle) at run time, so it is the same on all three detail levels and the model files and scale are unchanged; it blends
+out on the ground, so standing and walking look as before. Firing still raises the rifle arm to aim (`FLIGHT_POSE` in
+`js/app.js`).
 In flight both characters bank into turns, lean with speed and pitch back when climbing / forward when diving, and turn their
 heads into the turn (up to 30°). The dragon also beats its wings (slowly when cruising, faster and deeper on boost, folded
 when landed) and swings its tail. The chase, far and side cameras and the cockpit / rider's-eye view are sized per character. The chase, far, side and start-screen

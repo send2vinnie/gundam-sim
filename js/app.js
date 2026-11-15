@@ -72,7 +72,7 @@
   const DRAGON_WALK_RAISE = 25 * DEG;   // on foot the body is raised from the flight attitude to stand (30 deg forward lean)
   const DRAGON_WALK_HEAD_TILT = 12 * DEG;   // at most this much head tilt to compensate, so the horns stay close to the rider's hands
   const CHARACTERS = {
-    gundam: { name: "Gundam RX-78-02 (18 m)", leanMax: 68, phys: { mass: 43.4, thrust: 7, climb: 5, rollRate: 45 * DEG, lift: "thrusters", stall: 0 }, center: MS_CENTER, eye: 16.6, eyeFwd: 1.5, height: MS_HEIGHT, unit: "MS height", cams: [55, 160, 45],
+    gundam: { name: "Gundam RX-78-02 (18 m)", leanMax: 55, phys: { mass: 43.4, thrust: 7, climb: 5, rollRate: 45 * DEG, lift: "thrusters", stall: 0 }, center: MS_CENTER, eye: 16.6, eyeFwd: 1.5, height: MS_HEIGHT, unit: "MS height", cams: [55, 160, 45],
       // walking (m/s, deg/s, m): run = Shift; step = highest ledge it steps onto (higher blocks), drop = edge it walks off,
       // enter = slowest ground speed that switches to walking, probe = how far ahead walls are checked
       walk: { walk: 4.5, run: 12, back: 2.5, side: 3, turn: 50, step: 3.0, drop: 4.0, jump: 9, enter: 18, probe: 5, probeSide: 3.5 } },
@@ -1405,16 +1405,16 @@ void main() {
         - (fly.character === "dragon" ? DRAGON_WALK_RAISE / DEG : 0);
       fly.lean += (lw * DEG - fly.lean) * (1 - Math.exp(-dt * 6)); fly.bank += (0 - fly.bank) * (1 - Math.exp(-dt * 6));
     } else { fly.lean += (targetLean - fly.lean) * k; fly.bank += (targetBank - fly.bank) * k; }
-    // Gundam flying pose (a superhero dive): it builds up with forward speed while airborne. The body pitches forward (lean),
-    // the head comes up to look ahead, both arms reach forward and the legs trail behind with the knees bent.
-    const poseT = fly.walking || fly.grounded ? 0 : Math.max(0, Math.min(1, fly.vf / MAX_FWD));
+    // Gundam flight pose (FLIGHT_POSE, from a reference figure photo): held whenever it is airborne, blended out on the
+    // ground and while walking. The body lean, bank, head turns and firing still play on top of it.
+    const poseT = fly.walking || fly.grounded ? 0 : 1;
     fly.flyPose = (fly.flyPose || 0) + (poseT - (fly.flyPose || 0)) * (1 - Math.exp(-dt * 2.5));
     updateGait(dt, gaitSpeed, WK);
     // head: looks into the turn (up to 30 deg) and a little up/down with climbs and dives
     const kh = 1 - Math.exp(-dt * 5);
     const turn = Math.max(-1, Math.min(1, fly.yawRate / TURN_RATE + 0.35 * fly.vs / MAX_STRAFE));
     fly.headYaw = (fly.headYaw || 0) + (turn * 30 * DEG - (fly.headYaw || 0)) * kh;
-    const headUp = fly.character === "dragon" ? 0 : Math.min(35 * DEG, Math.max(0, fly.lean) * 0.6) * (fly.flyPose || 0);   // dive: keep looking ahead
+    const headUp = fly.character === "dragon" ? 0 : (FLIGHT_POSE.head + Math.min(25 * DEG, Math.max(0, fly.lean) * 0.4)) * (fly.flyPose || 0);   // keep looking ahead when leaning
     fly.headPitch = (fly.headPitch || 0) + (Math.max(-1, Math.min(1, fly.vu / MAX_VERT)) * 12 * DEG + headUp - (fly.headPitch || 0)) * kh;
     if (PROF) tp = PROF.add("flight:physics", tp);
     if (fly.model) {
@@ -1747,6 +1747,26 @@ void main() {
       model.__legs = Object.keys(LEG_NODES).every((k) => n[k]) ? n : null; }
     return model.__legs;
   }
+  // Flight pose (radians; swing about the joint's x axis, negative = forward; abd about the forward axis, + = to its left):
+  // a reference figure photo of the RX-78 flying toward the camera, torso leaning in. Rifle arm forward and a little out,
+  // (the shield arm is also turned about its own axis so the shield face looks forward)
+  // the rifle held level ahead at chest height; shield arm raised forward and out so the shield stands up beside the
+  // head; right leg forward with the knee sharply bent and the shin hanging under it; left leg trailing back and out,
+  // knee slightly bent, foot pointed. Arm angles follow the body lean so the rifle and shield keep their place in the world.
+  const FLIGHT_POSE = {
+    head: 6 * DEG,
+    armR: { reach: 75 * DEG, max: 120 * DEG, abd: -18 * DEG }, armL: { reach: 60 * DEG, max: 100 * DEG, abd: 30 * DEG, twist: -60 * DEG },
+    thighR: [-70 * DEG, -6 * DEG], shinR: 75 * DEG, footR: 18 * DEG,
+    thighL: [22 * DEG, 12 * DEG], shinL: 28 * DEG, footL: 38 * DEG
+  };
+  const scratchPoseM3 = new C.Matrix3(), scratchPoseZ = new C.Matrix3(), scratchPoseY = new C.Matrix3();
+  function setLegPose(node, name, swing, abd, twist) {   // twist about the limb's own axis, swing about x, then abduction about the forward axis
+    const t = LEG_NODES[name];
+    C.Matrix3.multiply(C.Matrix3.fromRotationZ(abd, scratchPoseZ), C.Matrix3.fromRotationX(swing, scratchLegM3), scratchPoseM3);
+    if (twist) C.Matrix3.multiply(scratchPoseM3, C.Matrix3.fromRotationY(twist, scratchPoseY), scratchPoseM3);
+    node.matrix = C.Matrix4.fromRotationTranslation(scratchPoseM3, new C.Cartesian3(t[0], t[1], t[2]), node.matrix ? C.Matrix4.clone(node.matrix) : new C.Matrix4());
+  }
+  const armReach = (a) => -Math.min(a.max, a.reach + Math.max(0, fly.lean)) * (fly.flyPose || 0);   // shoulder swing for the flight pose
   function setLeg(node, name, ang) { const t = LEG_NODES[name]; node.matrix = C.Matrix4.fromRotationTranslation(C.Matrix3.fromRotationX(ang, scratchLegM3), new C.Cartesian3(t[0], t[1], t[2]), node.matrix ? C.Matrix4.clone(node.matrix) : new C.Matrix4()); }
   function updateGait(dt, speed, WK) {
     // gait: 0 standing .. 1 walking, gaitRun 0 walk .. 1 run; the phase advances with the distance covered
@@ -1786,11 +1806,11 @@ void main() {
         return { hip, knee, foot: -(hip + knee) * 0.85 }; };
       const L = leg(ph), R = leg(ph + Math.PI);
       if (legs) {
-        // flying pose: legs trail back with bent knees and pointed feet (the left more bent), shield arm reaches forward
-        const fp = fly.flyPose || 0;
-        setLeg(legs.thighL, "thighL", L.hip + 12 * DEG * fp); setLeg(legs.shinL, "shinL", L.knee + 62 * DEG * fp); setLeg(legs.footL, "footL", L.foot + 25 * DEG * fp);
-        setLeg(legs.thighR, "thighR", R.hip + 24 * DEG * fp); setLeg(legs.shinR, "shinR", R.knee + 30 * DEG * fp); setLeg(legs.footR, "footR", R.foot + 25 * DEG * fp);
-        setLeg(legs.armL, "armL", (14 + 18 * r) * DEG * g * Math.sin(ph) + 10 * DEG * st - reachAngle() * 0.8);   // shield arm swings opposite the left leg
+        // flight pose blended in while airborne (fp = 0 on the ground, so walking is unchanged)
+        const fp = fly.flyPose || 0, P = FLIGHT_POSE;
+        setLegPose(legs.thighL, "thighL", L.hip + P.thighL[0] * fp, P.thighL[1] * fp); setLeg(legs.shinL, "shinL", L.knee + P.shinL * fp); setLeg(legs.footL, "footL", L.foot + P.footL * fp);
+        setLegPose(legs.thighR, "thighR", R.hip + P.thighR[0] * fp, P.thighR[1] * fp); setLeg(legs.shinR, "shinR", R.knee + P.shinR * fp); setLeg(legs.footR, "footR", R.foot + P.footR * fp);
+        setLegPose(legs.armL, "armL", (14 + 18 * r) * DEG * g * Math.sin(ph) + 10 * DEG * st + armReach(P.armL), P.armL.abd * fp, P.armL.twist * fp);   // shield arm swings opposite the left leg
       }
       fly.armSwing = -(14 + 18 * r) * DEG * g * Math.sin(ph);   // rifle arm: forward when the left leg is forward
       // the lower foot stays on the ground: drop the body by how much the legs are shortened
@@ -1811,20 +1831,21 @@ void main() {
     if (effects.filter((e) => e.dust).length >= (LOW_GFX ? 3 : 6)) return;
     burst(pos, { inner: "rgba(205,195,175,0.75)", outer: "rgba(160,150,130,0.45)", c0: "rgba(200,190,170,0.6)", c1: "rgba(160,150,130,0)", n: 12 * k + 3, v0: 0.4 * k, v1: 3 * k, life: 1.4, px: 4 * k, s0: 1, s1: 3, radius: 1.5 * k, dust: true });
   }
-  // flying pose: the arms reach forward and down, about 40 deg below the flight line whatever the body pitch (radians, forward)
-  const reachAngle = () => Math.min(120 * DEG, 40 * DEG + Math.max(0, fly.lean)) * (fly.flyPose || 0);
   // fire animations
   function poseGundamArm(dt) {
     const t = fly.fireT === undefined ? 99 : fly.fireT;
     // raise and aim for 1.4 s after a shot, then lower; arm angle about the shoulder (negative = forward/up), -90 deg = level
-    const aim = t < 1.4 ? -(90 * DEG + (fly.aimPitch || 0) + fly.lean * 0.6) : -reachAngle();   // flying pose: reaching forward
+    const aim = t < 1.4 ? -(90 * DEG + (fly.aimPitch || 0) + fly.lean * 0.6) : armReach(FLIGHT_POSE.armR);   // flight pose: rifle held ahead
     const recoil = t < 0.25 ? 10 * DEG * Math.exp(-t * 18) : 0;
     fly.armAngle = (fly.armAngle || 0) + (aim - (fly.armAngle || 0)) * (1 - Math.exp(-dt * (t < 1.4 ? 14 : 4)));
     // walking: the rifle arm swings opposite the right leg, fading out as the arm comes up to aim
     const swing = (fly.armSwing || 0) * Math.max(0, 1 - Math.abs(fly.armAngle) / (30 * DEG));
     const ang = fly.armAngle + recoil + swing;
     const n = fly.model && fly.model.ready && (fly.model.__arm !== undefined ? fly.model.__arm : (fly.model.__arm = (() => { try { return fly.model.getNode("armR") || null; } catch (e) { return null; } })()));
-    if (n) n.matrix = C.Matrix4.fromRotationTranslation(C.Matrix3.fromRotationX(ang), new C.Cartesian3(ARM_PIVOT[0], ARM_PIVOT[1], ARM_PIVOT[2]));
+    // the flight pose also turns the arm a little out from the body (less while aiming, so the shot still leaves along the aim line)
+    const abd = FLIGHT_POSE.armR.abd * (fly.flyPose || 0) * (t < 1.4 ? 0 : 1);
+    fly.armAbd = (fly.armAbd || 0) + (abd - (fly.armAbd || 0)) * (1 - Math.exp(-dt * 10));
+    if (n) n.matrix = C.Matrix4.fromRotationTranslation(C.Matrix3.multiply(C.Matrix3.fromRotationZ(fly.armAbd), C.Matrix3.fromRotationX(ang), new C.Matrix3()), new C.Cartesian3(ARM_PIVOT[0], ARM_PIVOT[1], ARM_PIVOT[2]));
   }
   function dragonFireAnim() { // [extra head pitch, extra wing] for the rear-back / lunge
     const t = fly.fireT === undefined ? 99 : fly.fireT;
@@ -1963,7 +1984,7 @@ void main() {
   }
 
   // expose for debugging / automated tests
-  window.GFS = { viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
+  window.GFS = { FLIGHT_POSE, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
 
   (async () => {
     $("startBtn").disabled = true; $("startBtn").textContent = "Loading…";
