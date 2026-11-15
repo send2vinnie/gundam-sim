@@ -1657,39 +1657,63 @@ void main() {
     if (localWorld && localWorld.osmPrimitive) for (const id of hiddenOsm) { try { localWorld.osmPrimitive.getGeometryInstanceAttributes(id).show = C.ShowGeometryInstanceAttribute.toValue(true); } catch (e) { /* ignore */ } }
     hiddenOsm.clear(); destroyedSpots.length = 0;
   }
-  // The crosshair is a point in front of the character: at eye height, 5 m ahead of the Gundam's eyes / 1 m ahead of the
-  // rider's, on the line from the eyes to the target. The target is what the camera sees through the crosshair: the first
-  // real surface (our own shots, smoke and flashes hidden) on the camera's line through that point, else the point at
-  // full range. So the eyes, the crosshair and the target are on one line (the character aims through the crosshair), and
-  // on screen the crosshair sits over the target. The two conditions are met together by a few quick refinements per frame.
+  // Aiming: the target is what is at the centre of the screen (the first surface on the camera's centre line, else the
+  // point at full range). The crosshair is the point on the line from the character's eyes to that target, 5 m ahead of the
+  // Gundam's eyes / 1 m ahead of the rider's; the character aims from its eyes through the crosshair to the target. In the
+  // cockpit view (where the eyes are the camera) the crosshair lags the movement a little (about 0.15 s): turning, climbing
+  // or sidestepping shifts it off centre and it settles back; the aim goes through the crosshair as drawn.
   const AIM_AHEAD = { gundam: 5, dragon: 1 };
-  function aimEye() {
-    const ch = CH(), s = Math.sin(fly.az * DEG), c = Math.cos(fly.az * DEG), e = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
+  function aimEye() {   // the eyes as drawn (they move with the body lean and bank)
+    const ch = CH();
+    if (fly.model && fly.model.modelMatrix) return toWorld(fly.model.modelMatrix, [ch.eyeFwd, 0, ch.eye]);
+    const s = Math.sin(fly.az * DEG), c = Math.cos(fly.az * DEG), e = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
     return C.Cartesian3.fromDegrees(e.lon, e.lat, fly.h + ch.eye);
   }
-  function updateAim(gpuOk) {
-    const W = WEAPONS[fly.character || "gundam"], eye = aimEye(), D = AIM_AHEAD[fly.character] || 5, cam = camera.positionWC;
-    let T = fly.aimT || C.Cartesian3.add(cam, C.Cartesian3.multiplyByScalar(camera.directionWC, W.range, new C.Cartesian3()), new C.Cartesian3());
-    let R, ray, hit = null, known = true;
-    for (let k = 0; k < 3; k++) {
-      const toT = C.Cartesian3.subtract(T, eye, new C.Cartesian3()); if (C.Cartesian3.magnitude(toT) < D + 1) C.Cartesian3.clone(camera.directionWC, toT);
-      R = C.Cartesian3.add(eye, C.Cartesian3.multiplyByScalar(C.Cartesian3.normalize(toT, toT), D, toT), new C.Cartesian3());
-      const dir = C.Cartesian3.normalize(C.Cartesian3.subtract(R, cam, new C.Cartesian3()), new C.Cartesian3());
-      ray = new C.Ray(R, dir);
-      let h = cpuRay(ray, W.range + 200, true);
-      if (h === null && gpuOk && k === 2) { try { h = withOwnFxHidden(() => scene.pickFromRay(ray, [fly.model, fly.pendingModel, fly.rider].filter(Boolean), 1.0)); } catch (e) { h = undefined; } }
-      known = h !== null;
-      if (h && h.position && C.Cartesian3.distance(R, h.position) < W.range + 200) { T = C.Cartesian3.clone(h.position); hit = { position: T, cpu: !!h.distance }; }
-      else { const d = h === null && fly.aimT ? Math.max(D + 1, C.Cartesian3.distance(R, fly.aimT)) : W.range;   // unknown on the CPU: keep the distance
-        T = C.Cartesian3.add(R, C.Cartesian3.multiplyByScalar(dir, d, new C.Cartesian3()), new C.Cartesian3()); hit = h === null ? fly.aimHit || null : null; }
+  function updateAim(gpuOk, dt) {
+    const cockpit = CAMS[fly.cam].range === 0, W = WEAPONS[fly.character || "gundam"], D = AIM_AHEAD[fly.character] || 5;
+    const eye = cockpit ? C.Cartesian3.clone(camera.positionWC) : aimEye();   // in the cockpit the eyes are the camera
+    const cv = scene.canvas, cray = camera.getPickRay(new C.Cartesian2(cv.clientWidth / 2, cv.clientHeight / 2));
+    // the screen-centre target
+    let h = cpuRay(cray, W.range + 200, true), T, hit = null;
+    if (h === null && gpuOk) { try { h = withOwnFxHidden(() => scene.pickFromRay(cray, [fly.model, fly.pendingModel, fly.rider].filter(Boolean), 1.0)); } catch (e) { h = undefined; } }
+    if (h && h.position && C.Cartesian3.distance(cray.origin, h.position) < W.range + 200) { T = C.Cartesian3.clone(h.position); hit = { position: T, cpu: !!h.distance }; }
+    else { const d = h === null && fly.aimT ? C.Cartesian3.distance(cray.origin, fly.aimT) : W.range;   // unknown on the CPU: keep the distance
+      T = C.Cartesian3.add(cray.origin, C.Cartesian3.multiplyByScalar(cray.direction, d, new C.Cartesian3()), new C.Cartesian3()); hit = h === null ? fly.aimHit || null : null; }
+    const toT = C.Cartesian3.subtract(T, eye, new C.Cartesian3());
+    const want = C.Cartesian3.magnitude(toT) > D + 0.5 ? C.Cartesian3.normalize(toT, toT) : C.Cartesian3.clone(cray.direction);
+    if (dt !== undefined) {
+      if (cockpit && fly.aimDir && fly.aimEyePrev && fly.aimCockpit) {
+        const k = 1 - Math.exp(-dt / 0.15);
+        fly.aimDir = C.Cartesian3.normalize(C.Cartesian3.lerp(fly.aimDir, want, k, new C.Cartesian3()), new C.Cartesian3());
+        // sideways/vertical movement drags the crosshair back a little (not along the line of sight), eased the same way
+        const v = C.Cartesian3.multiplyByScalar(C.Cartesian3.subtract(eye, fly.aimEyePrev, new C.Cartesian3()), 1 / Math.max(dt, 1e-3), new C.Cartesian3());
+        const along = C.Cartesian3.multiplyByScalar(fly.aimDir, C.Cartesian3.dot(v, fly.aimDir), new C.Cartesian3());
+        // (scaled to the crosshair distance, so it is the same angle for both characters; slow drifts such as the hover sink,
+        // under 3 m/s, are ignored so a steady hover keeps it centred)
+        const side = C.Cartesian3.subtract(v, along, new C.Cartesian3()), sp = C.Cartesian3.magnitude(side);
+        const lat = sp > 3 ? C.Cartesian3.multiplyByScalar(side, -0.024 * D * (sp - 3) / sp, new C.Cartesian3()) : new C.Cartesian3();
+        if (C.Cartesian3.magnitude(lat) > 0.3 * D) C.Cartesian3.multiplyByScalar(C.Cartesian3.normalize(lat, lat), 0.3 * D, lat);
+        fly.aimLag = C.Cartesian3.lerp(fly.aimLag || new C.Cartesian3(), lat, k, new C.Cartesian3());
+      } else { fly.aimDir = C.Cartesian3.clone(want); fly.aimLag = new C.Cartesian3(); }
+      fly.aimEyePrev = C.Cartesian3.clone(eye); fly.aimCockpit = cockpit;
     }
-    fly.aimT = T; fly.aimHit = hit; fly.aimR = R; fly.aimKnown = known;
+    const dir = fly.aimDir || want;
+    const R = C.Cartesian3.add(C.Cartesian3.add(eye, C.Cartesian3.multiplyByScalar(dir, D, new C.Cartesian3()), new C.Cartesian3()), fly.aimLag || C.Cartesian3.ZERO, new C.Cartesian3());
+    // the aim line eyes -> crosshair; while the crosshair lags (cockpit) the target is where that line meets the city
+    const line = C.Cartesian3.normalize(C.Cartesian3.subtract(R, eye, new C.Cartesian3()), new C.Cartesian3());
+    let ray = cray;
+    if (C.Cartesian3.angleBetween(line, want) > 0.2 * DEG) {
+      ray = new C.Ray(R, line); const h2 = cpuRay(ray, W.range + 200, false);
+      if (h2) { T = C.Cartesian3.clone(h2.position); hit = { position: T, cpu: true }; }
+      else { T = C.Cartesian3.add(R, C.Cartesian3.multiplyByScalar(line, C.Cartesian3.distance(eye, T), new C.Cartesian3()), new C.Cartesian3()); hit = null; }
+    }
+    fly.aimT = T; fly.aimHit = hit; fly.aimR = R;
     return { target: T, hit, ray };
   }
   // the crosshair on screen: where the point in front of the character is (kept on screen)
   const crosshairEl = $("crosshair");
-  function updateCrosshair() {
-    updateAim(false);
+  function updateCrosshair(dt) {
+    updateAim(false, dt);
     const w = fly.aimR && C.SceneTransforms.worldToWindowCoordinates(scene, fly.aimR), cv = scene.canvas;
     if (!w) return;
     fly.crosshairXY = [Math.max(16, Math.min(cv.clientWidth - 16, w.x)), Math.max(16, Math.min(cv.clientHeight - 16, w.y))];
@@ -2183,7 +2207,7 @@ void main() {
     if (state.mode === "fly") {
       updateFlight(dt); if (PROF) t0 = PROF.add("flight", t0);
       updateWeapons(dt); updateThrusters(dt); if (PROF) t0 = PROF.add("weapons+fx", t0);
-      updateCamera(dt); applyShake(dt); updateCrosshair(); if (PROF) t0 = PROF.add("camera", t0);
+      updateCamera(dt); applyShake(dt); updateCrosshair(dt); if (PROF) t0 = PROF.add("camera", t0);
     }
     else if (state.mode === "lobby" && lobby.active) { readInput(); lobbyCamera(dt); if (PROF) t0 = PROF.add("lobby", t0); }
     else if (state.mode === "pause") readInput();

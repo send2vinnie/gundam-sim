@@ -214,10 +214,12 @@ lurch forward, no control), then it walks.
 * **Camera:** the chase camera comes lower and closer on foot, blended in and out over about a second so it never jumps.
 
 ## Weapons and destructible buildings
-The green crosshair sits in front of the character: 5 m ahead of the Gundam's eyes, or 1 m ahead of the dragon rider's, at
-eye height. You aim at what you see through it: the target is the first surface on the camera's line through the crosshair,
-and the crosshair is placed on the line from the eyes to that target, so the eyes, the crosshair and the target are in
-one line and the crosshair sits over the target on screen (it moves with the character and the camera; kept on screen).
+You aim at what is at the centre of the screen: the target is the first surface on the camera's centre line. The green
+crosshair sits in front of the character on the line from its eyes to that target: 5 m ahead of the Gundam's eyes, or 1 m
+ahead of the dragon rider's, and the character aims from its eyes through the crosshair to the target (in the chase and
+side views it shows near the head, not at the screen centre). In the cockpit view the eyes are the camera, so the
+crosshair is centred, but it lags the movement a little (about 0.15 s): turning, climbing or sidestepping fast shifts it
+off centre and it settles back; the aim goes through it as drawn.
 Fire (F, left click, gamepad RB/X, or the FIRE button on touch screens).
 * **Gundam - beam rifle:** the right arm swings up to aim along the crosshair (the arm and rifle are a separate part pivoted at
   the shoulder), with a recoil kick, a muzzle flash and the head looking at the target. A pink-white beam bolt flies at 600 m/s.
