@@ -86,13 +86,17 @@ well forward as it flies (about 25° hovering, 45° at slow cruise, 55° at full
 the neck takes back the whole lean plus 15° (up to 80°) so the head looks up along the flight path, the rifle is
 carried low: the upper arm hangs down, a little forward and out (armpit open about 22°), the elbow bends so the
 forearm points forward, and the rifle is turned at the fist so its barrel stays exactly level along the heading at any
-lean. When you fire, the forearm lifts a little and the rifle turns at the fist to the crosshair target; until the shot
+lean. When you fire, the forearm lifts a little and the rifle turns at the fist to the crosshair target, but only
+within a natural cone around the carry (25° to either side, 20° up, 15° down) and never rolled (its sight stays on top);
+a target further to the side turns the whole Gundam toward it (quickly, while the camera keeps its view), and a shot the
+rifle can't point at goes along the barrel instead; until the shot
 leaves, the aim keeps following the crosshair (so turning while firing still hits what the crosshair is on). The beam
 leaves from the rifle's muzzle once the barrel points there (within 2°, usually under 0.1 s) and flies along the barrel
 to the point under the crosshair; the dragon's fireball also goes to the point under the crosshair when it leaves the
 mouth. On foot the arm is straight and swings up to aim as before, with the rifle lined up on the target the same way. Each beam kicks the hand up with recoil once it has left the muzzle (so the shot is never thrown off): the forearm
 flexes about 10°, the shoulder lifts about 5° and the barrel pitches up about 16°, peaking at about 60 ms and easing
-back within about 300 ms; rapid shots stack a little (capped). Flying and on foot alike; the camera stays steady. The shield arm hangs at its side swung a little back with the armpit open 30° and the shield face out, and both
+back within about 300 ms; rapid shots stack a little (capped). Flying and on foot alike; the camera stays steady. The shield arm hangs at its side swung a little back with the armpit open 30° and the shield face out; its elbow
+(`forearmL`) bends so the forearm and shield hang straight down beside the body at any lean, and both
 legs trail back and out, stretched with the knees slightly bent and the feet pointed (the right a touch less than the
 left). The pose is set on the model's joints at run time, so it is the same on all three detail levels and the scale is
 unchanged; it blends out on the ground, so standing and walking look as before (`FLIGHT_POSE` in `js/app.js`). The
@@ -237,7 +241,7 @@ turns the camera. The app searches the OSM buildings within 250 m of the configu
 plaza rather than a roof. Move it by editing `LOBBY` in `js/app.js`.
 
 ## Files
-* `models/gundam_rx78_18m.glb` flight model (static pose, rifle and shield in hand, faces +X). Its head is a separate node (`head`, pivoted at the neck) so in flight it looks into turns (up to 30°) and up/down with climbs and dives, while the body banks into turns and pitches back when climbing and forward when diving. The legs (hip, knee and ankle: `thighL/R`, `shinL/R`, `footL/R`) and the shield arm with the whole shield (`armL`) are separate nodes too, split by `tools/build_gundam_legs.js` (all three detail levels), for the walking animation. The right forearm (`forearmR`, pivoted at the elbow) and the beam rifle with the right fist (`rifle`, its child, pivoted at the fist) are separate nodes too (`tools/build_gundam_rifle.js`), so the arm can bend and the rifle can stay level or aim.
+* `models/gundam_rx78_18m.glb` flight model (static pose, rifle and shield in hand, faces +X). Its head is a separate node (`head`, pivoted at the neck) so in flight it looks into turns (up to 30°) and up/down with climbs and dives, while the body banks into turns and pitches back when climbing and forward when diving. The legs (hip, knee and ankle: `thighL/R`, `shinL/R`, `footL/R`) and the shield arm with the whole shield (`armL`) are separate nodes too, split by `tools/build_gundam_legs.js` (all three detail levels), for the walking animation. The left forearm with the whole shield (`forearmL`, pivoted at the elbow), the right forearm (`forearmR`, pivoted at the elbow) and the beam rifle with the right fist (`rifle`, its child, pivoted at the fist) are separate nodes too (`tools/build_gundam_rifle.js`), so the arm can bend and the rifle can stay level or aim.
 * `models/gundam_rx78_pullup_18m.glb` skinned model with the `PullUp` loop (faces +Z): 3 reps in 14.7 s that slow down with fatigue, a pause with the chin over the bar, a slower controlled descent, the upper body leaning back behind the bar as it rises (head over the bar from behind, legs swinging forward to balance), and legs that lag and swing slightly. The fists stay closed around a round bar in one overhand grip the whole time (the finger curl is baked into the mesh, so no extra joints are needed on phones), and the arms are solved every frame so the forearms stay near vertical under the bar while the elbows travel down and out.
 * `models/*_med.glb`, `models/*_low.glb` Medium and Low detail versions of both Gundam models
 * `models/pilot_*.glb` five pilot poses

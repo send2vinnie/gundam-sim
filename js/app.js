@@ -1647,6 +1647,14 @@ void main() {
     if (fly.character !== "dragon") { fly.recoil0 = fly.recoil || 0; fly.recoilA = Math.min(1.6, fly.recoil0 + 1); fly.recoilT = 0; }   // recoil: rapid shots stack a little, capped
     const W = WEAPONS[fly.character || "gundam"], dragon = fly.character === "dragon";
     const from = dragon ? dragonMouthWorld() : gundamMuzzleWorld(fly.armAngle || 0);
+    if (!dragon && fly.model) {
+      const bw = rifleBarrelWorld(), toT = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, from, new C.Cartesian3()), new C.Cartesian3());
+      if (C.Cartesian3.angleBetween(bw, toT) > 2 * DEG) {   // outside the rifle's reach: fire along the barrel
+        const ray = new C.Ray(from, bw); let h = cpuRay(ray, W.range + 200, false);
+        fly.fireTarget = h ? h.position : C.Cartesian3.add(from, C.Cartesian3.multiplyByScalar(bw, h === null ? C.Cartesian3.distance(from, fly.fireTarget) : W.range, new C.Cartesian3()), new C.Cartesian3());
+        fly.fireHit = h ? { position: h.position, cpu: true } : null;
+      }
+    }
     if (fly.model) fly.lastLaunch = { from: C.Cartesian3.clone(from), barrel: dragon ? null : rifleBarrelWorld(), target: C.Cartesian3.clone(fly.fireTarget), t: fly.fireT,   // for tests
       px: (() => { const w = C.SceneTransforms.worldToWindowCoordinates(scene, fly.fireTarget); return w ? Math.hypot(w.x - scene.canvas.clientWidth / 2, w.y - scene.canvas.clientHeight / 2) : null; })() };
     const dir = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, from, new C.Cartesian3()), new C.Cartesian3());
@@ -1769,7 +1777,7 @@ void main() {
   // both legs trailing back and out, stretched, knees slightly bent and feet pointed (the right a touch less: no stiff mirror).
   const FLIGHT_POSE = {
     head: 15 * DEG, headMax: 80 * DEG,
-    armR: { carry: true, abd: -22 * DEG, fireRaise: 10 * DEG }, armL: { back: 15 * DEG, abd: 30 * DEG, twist: 0 },
+    armR: { carry: true, abd: -22 * DEG, fireRaise: 10 * DEG }, armL: { back: 15 * DEG, abd: 30 * DEG, twist: 0, elbow: 15 * DEG, hang: 28 * DEG },
     thighR: [18 * DEG, -9 * DEG], shinR: 22 * DEG, footR: 33 * DEG,
     thighL: [22 * DEG, 12 * DEG], shinL: 28 * DEG, footL: 38 * DEG
   };
@@ -1826,6 +1834,10 @@ void main() {
         setLegPose(legs.thighL, "thighL", L.hip + P.thighL[0] * fp, P.thighL[1] * fp); setLeg(legs.shinL, "shinL", L.knee + P.shinL * fp); setLeg(legs.footL, "footL", L.foot + P.footL * fp);
         setLegPose(legs.thighR, "thighR", R.hip + P.thighR[0] * fp, P.thighR[1] * fp); setLeg(legs.shinR, "shinR", R.knee + P.shinR * fp); setLeg(legs.footR, "footR", R.foot + P.footR * fp);
         setLegPose(legs.armL, "armL", (14 + 18 * r) * DEG * g * Math.sin(ph) + 10 * DEG * st + armReach(P.armL), P.armL.abd * fp, P.armL.twist * fp);   // shield arm swings opposite the left leg
+        // left elbow (forearmL: forearm, fist and shield): flying, a slight bend and the forearm turned back in under the
+        // opened upper arm, so the shield hangs lower beside the thigh; straight on foot (the walking swing is unchanged)
+        const fl = getNodeCached("__foreL", "forearmL");
+        if (fl) fl.matrix = C.Matrix4.fromRotationTranslation(C.Matrix3.multiply(C.Matrix3.fromRotationZ(-P.armL.hang * fp), C.Matrix3.fromRotationX(-Math.min(95 * DEG, P.armL.elbow + Math.max(0, fly.lean)) * fp), new C.Matrix3()), new C.Cartesian3(0.3, -5.0, 0.0));
       }
       fly.armSwing = -(14 + 18 * r) * DEG * g * Math.sin(ph);   // rifle arm: forward when the left leg is forward
       // the lower foot stays on the ground: drop the body by how much the legs are shortened
@@ -1865,10 +1877,16 @@ void main() {
     const G = handToWorld(armRot, foreRot, RIFLE_GRIP), cols = [];
     for (const e of [[1, 0, 0], [0, 1, 0], [0, 0, 1]]) cols.push(C.Cartesian3.subtract(handToWorld(armRot, foreRot, [RIFLE_GRIP[0] + e[0], RIFLE_GRIP[1] + e[1], RIFLE_GRIP[2] + e[2]]), G, new C.Cartesian3()));
     const M = new C.Matrix3(cols[0].x, cols[1].x, cols[2].x, cols[0].y, cols[1].y, cols[2].y, cols[0].z, cols[1].z, cols[2].z);   // forearm local -> world (linear)
-    const dl = C.Cartesian3.normalize(C.Matrix3.multiplyByVector(C.Matrix3.inverse(M, new C.Matrix3()), dirW, new C.Cartesian3()), new C.Cartesian3());
-    const axis = C.Cartesian3.cross(BARREL, dl, new C.Cartesian3()), sin = C.Cartesian3.magnitude(axis), cos = C.Cartesian3.dot(BARREL, dl);
-    if (sin < 1e-6) return C.Quaternion.clone(C.Quaternion.IDENTITY);
-    return C.Quaternion.fromAxisAngle(C.Cartesian3.normalize(axis, axis), Math.atan2(sin, cos), new C.Quaternion());
+    const Mi = C.Matrix3.inverse(M, new C.Matrix3());
+    const dl = C.Cartesian3.normalize(C.Matrix3.multiplyByVector(Mi, dirW, new C.Cartesian3()), new C.Cartesian3());
+    // no roll: the rifle's top (its sight, +z in the rifle node) stays on the side of world up
+    const upL = C.Cartesian3.normalize(C.Matrix3.multiplyByVector(Mi, C.Cartesian3.normalize(G, new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3());
+    let top = C.Cartesian3.subtract(upL, C.Cartesian3.multiplyByScalar(dl, C.Cartesian3.dot(upL, dl), new C.Cartesian3()), new C.Cartesian3());
+    if (C.Cartesian3.magnitude(top) < 1e-3) return C.Quaternion.clone(fly.rifleQ || C.Quaternion.IDENTITY);   // straight up/down: keep the last
+    C.Cartesian3.normalize(top, top);
+    const yAx = C.Cartesian3.negate(dl, new C.Cartesian3()), xAx = C.Cartesian3.cross(yAx, top, new C.Cartesian3());   // columns: x = y cross z
+    const R = new C.Matrix3(xAx.x, yAx.x, top.x, xAx.y, yAx.y, top.y, xAx.z, yAx.z, top.z);
+    return C.Quaternion.fromRotationMatrix(R, new C.Quaternion());
   }
   const getNodeCached = (key, name) => fly.model && fly.model.ready && (fly.model[key] !== undefined ? fly.model[key] : (fly.model[key] = (() => { try { return fly.model.getNode(name) || null; } catch (e) { return null; } })()));
   function poseGundamArm(dt) {
@@ -1905,10 +1923,22 @@ void main() {
     const G = handToWorld(armRot, fly.foreRot, RIFLE_GRIP);
     const enu = C.Transforms.eastNorthUpToFixedFrame(G, undefined, new C.Matrix4());
     const level = C.Cartesian3.normalize(C.Matrix4.multiplyByPointAsVector(enu, new C.Cartesian3(Math.sin(fly.az * DEG), Math.cos(fly.az * DEG), 0), new C.Cartesian3()), new C.Cartesian3());
-    let dir = level, w = fp;
+    let dir = level, w = fp, want = null;
     if (aiming && fly.fireTarget) {
-      const d = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, G, new C.Cartesian3()), new C.Cartesian3());
-      if (C.Cartesian3.dot(d, level) > -0.2) { dir = d; w = 1; }   // never twist the wrist to fire backwards
+      // firing: the rifle turns toward the target only within a natural cone around the level carry (25 deg to either side,
+      // 20 deg up, 15 deg down). Flying, the Gundam itself turns toward a target further to the side (quickly; the camera
+      // keeps its view), so the wrist never twists to odd angles. A shot leaves along the barrel either way (see launch).
+      want = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, G, new C.Cartesian3()), new C.Cartesian3());
+      const east = C.Matrix4.multiplyByPointAsVector(enu, C.Cartesian3.UNIT_X, new C.Cartesian3()), north = C.Matrix4.multiplyByPointAsVector(enu, C.Cartesian3.UNIT_Y, new C.Cartesian3()), upE = C.Matrix4.multiplyByPointAsVector(enu, C.Cartesian3.UNIT_Z, new C.Cartesian3());
+      let yawOff = Math.atan2(C.Cartesian3.dot(want, east), C.Cartesian3.dot(want, north)) - fly.az * DEG; yawOff = Math.atan2(Math.sin(yawOff), Math.cos(yawOff));
+      const pitch = Math.asin(Math.max(-1, Math.min(1, C.Cartesian3.dot(want, upE))));
+      if (fp > 0.5 && Math.abs(yawOff) > 25 * DEG) {   // turn the body toward it (up to 400 deg/s), the camera stays where it looks
+        const step = Math.sign(yawOff) * Math.min(Math.abs(yawOff) - 25 * DEG, 400 * DEG * dt);
+        fly.az = ((fly.az + step / DEG) % 360 + 360) % 360; look.yaw -= step; yawOff -= step;
+      }
+      const yw = fly.az * DEG + Math.max(-25 * DEG, Math.min(25 * DEG, yawOff)), pt = Math.max(-15 * DEG, Math.min(20 * DEG, pitch));
+      dir = C.Cartesian3.normalize(C.Matrix4.multiplyByPointAsVector(enu, new C.Cartesian3(Math.sin(yw) * Math.cos(pt), Math.cos(yw) * Math.cos(pt), Math.sin(pt)), new C.Cartesian3()), new C.Cartesian3());
+      w = 1;
     }
     // recoil: the barrel pitches up about 16 deg (with the forearm), about the horizontal axis across the aim line
     let kdir = dir;
@@ -1922,7 +1952,7 @@ void main() {
     fly.rifleQ = C.Quaternion.slerp(fly.rifleQ || C.Quaternion.IDENTITY, goal, k, new C.Quaternion());
     fly.rifleRot = C.Matrix3.fromQuaternion(fly.rifleQ, fly.rifleRot || new C.Matrix3());
     rn.matrix = C.Matrix4.fromRotationTranslation(fly.rifleRot, new C.Cartesian3(RIFLE_GRIP[0] - ELBOW_R[0], RIFLE_GRIP[1] - ELBOW_R[1], RIFLE_GRIP[2] - ELBOW_R[2]));
-    fly.rifleAimed = !aiming || w < 1 || C.Cartesian3.angleBetween(rifleBarrelWorld(), dir) < 2 * DEG;
+    fly.rifleAimed = !aiming || !want || C.Cartesian3.angleBetween(rifleBarrelWorld(), want) < 2 * DEG;
   }
   // world direction of the rifle barrel as posed now
   function rifleBarrelWorld() {
