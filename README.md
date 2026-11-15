@@ -232,7 +232,9 @@ Fire (F, left click, gamepad RB/X, or the FIRE button on touch screens).
   target further to the side (the camera keeps its view); it never turns its head backwards, and a target it can't face is
   not hit (the fireball goes where the head points). It rears back with a wing flare, snaps straight and the fireball
   (80 m/s, with a fire trail) leaves the mouth along the head's line, then the head jerks back a little (recoil). The
-  rider keeps both hands on the horns.
+  rider keeps both hands on the horns. In the cockpit view the dragon aims and fires like the Gundam: the rifle's reach (25° to either
+  side, 20° up, 15° down), no rear-back wind-up, and the fireball leaves as soon as the head points at the target (at most
+  0.15 s), else along the head's line.
 * **Every shot explodes.** Each frame a beam or fireball checks the stretch it is about to fly through (and the street
   below it), so it bursts on the first wall, roof or ground it meets, even if the aim ray at firing time missed it (the
   fireball leaves the dragon's mouth, not the camera; tiles may load after firing). A shot that hits nothing bursts in the

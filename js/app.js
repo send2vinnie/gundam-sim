@@ -1574,6 +1574,12 @@ void main() {
   // to the side turns the whole dragon toward it (the camera keeps its view); it never turns its head backwards. After the
   // shot the head jerks back a little (recoil) and then eases back to its flight pose.
   const D_AIM = { yaw: 35 * DEG, up: 30 * DEG, down: 25 * DEG };   // yaw kept to 35 deg so the rider's arms (on the horns) are not stretched
+  // In the cockpit view the dragon aims and fires like the Gundam: the rifle's reach (25 deg to either side, 20 up, 15 down),
+  // no rear-back wind-up, and the fireball leaves as soon as the head points at the target (at most 0.15 s), else along
+  // the head's line. Outside the cockpit it keeps its own neck reach and wind-up (and the Gundam follows its rules).
+  const GUNDAM_REACH = { yaw: 25 * DEG, up: 20 * DEG, down: 15 * DEG };
+  const cockpitView = () => CAMS[fly.cam].range === 0;
+  const dragonReach = () => (cockpitView() ? GUNDAM_REACH : D_AIM);
   function dragonAim(dt) {
     const t = fly.fireT === undefined ? 99 : fly.fireT;
     fly.dAimYaw = fly.dAimYaw || 0; fly.dAimPitch = fly.dAimPitch || 0;
@@ -1586,12 +1592,14 @@ void main() {
       fly.dHead = saved;
       // the body turns toward a target beyond the neck's reach (up to 400 deg/s)
       let off = want[0] - fly.az * DEG; off = Math.atan2(Math.sin(off), Math.cos(off));
-      if (Math.abs(off) > D_AIM.yaw && Math.abs(off) < 170 * DEG) { const step = Math.sign(off) * Math.min(Math.abs(off) - D_AIM.yaw, 400 * DEG * dt);
+      const RCH = dragonReach();
+      if (Math.abs(off) > RCH.yaw && Math.abs(off) < 170 * DEG) { const step = Math.sign(off) * Math.min(Math.abs(off) - RCH.yaw, 400 * DEG * dt);
         fly.az = ((fly.az + step / DEG) % 360 + 360) % 360; look.yaw -= step; }
       let ey = want[0] - now[0]; ey = Math.atan2(Math.sin(ey), Math.cos(ey));
       const ep = want[1] - now[1], k = 1 - Math.exp(-dt * 30);   // close most of the error each frame (about 0.1 s in all)
-      fly.dAimYaw = Math.max(-D_AIM.yaw, Math.min(D_AIM.yaw, fly.dAimYaw + ey * k));
-      fly.dAimPitch = Math.max(-D_AIM.down, Math.min(D_AIM.up, fly.dAimPitch + ep / 0.8 * k));
+      fly.dHeadAimed = Math.hypot(ey, ep) < 2 * DEG;   // the head points at the target (used to release in the cockpit view)
+      fly.dAimYaw = Math.max(-RCH.yaw, Math.min(RCH.yaw, fly.dAimYaw + ey * k));
+      fly.dAimPitch = Math.max(-RCH.down, Math.min(RCH.up, fly.dAimPitch + ep / 0.8 * k));
     } else if (t > 0.6) {   // back to the flight pose
       const k = 1 - Math.exp(-dt * 5); fly.dAimYaw -= fly.dAimYaw * k; fly.dAimPitch -= fly.dAimPitch * k;
     }
@@ -1721,7 +1729,7 @@ void main() {
       const fpx = (cv.clientHeight / 2) / Math.tan(camera.frustum.fovy / 2), r = fpx * Math.tan(3.5 * DEG), cx = cv.clientWidth / 2, cy = cv.clientHeight / 2;
       scopeEl.style.left = (cx - r) + "px"; scopeEl.style.top = (cy - r) + "px"; scopeEl.style.width = scopeEl.style.height = 2 * r + "px";
       const outside = Math.hypot(w.x - cx, w.y - cy) > r;
-      const L = fly.character === "dragon" ? { yaw: D_AIM.yaw, up: D_AIM.up, down: D_AIM.down } : { yaw: 25 * DEG, up: 20 * DEG, down: 15 * DEG };
+      const L = GUNDAM_REACH;   // both characters have the rifle's reach in the cockpit view
       const eye = camera.positionWC, inv = C.Matrix4.inverseTransformation(C.Transforms.eastNorthUpToFixedFrame(eye), new C.Matrix4());
       const l = C.Matrix4.multiplyByPointAsVector(inv, C.Cartesian3.subtract(fly.aimR, eye, new C.Cartesian3()), new C.Cartesian3());
       let yo = Math.atan2(l.x, l.y) - fly.az * DEG; yo = Math.atan2(Math.sin(yo), Math.cos(yo));
@@ -1739,7 +1747,7 @@ void main() {
     // aim pitch (world) for the animation: angle of the line of fire above the horizon
     const up = C.Cartesian3.normalize(fly.model ? C.Matrix4.getTranslation(fly.model.modelMatrix, new C.Cartesian3()) : ray.origin, new C.Cartesian3());
     fly.aimPitch = Math.asin(Math.max(-1, Math.min(1, C.Cartesian3.dot(ray.direction, up))));
-    fly.fireT = 0; fly.fireTarget = target; fly.fireHit = hit; fly.fireDone = false; fly.rifleAimed = false;
+    fly.fireT = 0; fly.fireTarget = target; fly.fireHit = hit; fly.fireDone = false; fly.rifleAimed = false; fly.dHeadAimed = false;
     // the beam leaves once the rifle points at the target (a few frames); the fireball at the end of the head lunge
   }
   function launch() {
@@ -1858,7 +1866,7 @@ void main() {
   function updateWeapons(dt) {
     fireCooldown = Math.max(0, fireCooldown - dt);
     if (fly.fireT !== undefined && !fly.fireDone && fly.fireT > 0) { const a = crosshairTarget(false); if (a) { fly.fireTarget = a.target; fly.fireHit = a.hit; } }   // the aim follows the crosshair until the shot leaves
-    if (fly.fireT !== undefined) { fly.fireT += dt; if (!fly.fireDone && (fly.character === "dragon" ? fly.fireT >= 0.26 && Math.abs(fly.dHeadFa || 0) < 0.01 * DEG : fly.rifleAimed || fly.fireT >= ((fly.flyPose || 0) > 0.5 ? 0.15 : 0.35))) launch(); }
+    if (fly.fireT !== undefined) { fly.fireT += dt; if (!fly.fireDone && (fly.character === "dragon" ? (cockpitView() ? (fly.dHeadAimed && fly.fireT > 0) || fly.fireT >= 0.15 : fly.fireT >= 0.26 && Math.abs(fly.dHeadFa || 0) < 0.01 * DEG) : fly.rifleAimed || fly.fireT >= ((fly.flyPose || 0) > 0.5 ? 0.15 : 0.35))) launch(); }
     for (let i = shots.length - 1; i >= 0; i--) {
       const s = shots[i]; const step = Math.min(s.speed * dt, s.dist - s.travelled);
       // impact check along the shot's own path (never skipped): the aim ray at firing time can miss what the projectile
@@ -2157,7 +2165,7 @@ void main() {
   function dragonFireAnim() { // [extra head pitch, extra wing]: rear back with a wing flare, then snap straight to release
     // (the head is exactly on its aim line when the fireball leaves; the recoil after it is in dragonAim)
     const t = fly.fireT === undefined ? 99 : fly.fireT;
-    if (fly.fireDone || t >= 0.26) return [0, 0];
+    if (fly.fireDone || t >= 0.26 || cockpitView()) return [0, 0];   // no wind-up in the cockpit view
     if (t < 0.18) { const u = t / 0.18; return [22 * DEG * u, 30 * DEG * u]; }
     const u = (t - 0.18) / 0.08; return [22 * DEG * (1 - Math.sin(u * Math.PI / 2)), 30 * DEG * (1 - u)];
   }
