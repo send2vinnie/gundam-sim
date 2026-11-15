@@ -1493,12 +1493,16 @@ void main() {
         return;
       }
       const eye = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
-      // looking around (dragging) stays within the weapon's reach from where the body faces: 25 deg to either side, 20 up,
-      // 15 down (an ellipse); dragging further does nothing, so the view, crosshair and scope stop at the edge and every
-      // shot can reach what the crosshair is on
+      // looking around (dragging) stays within how far the character's head can turn from where the body faces (the
+      // Gundam's head 60 deg to either side, 30 up, 30 down; the dragon's 35, 30, 25), an ellipse; dragging further does
+      // nothing. The crosshair and scope stay within the weapon's reach inside that (see updateAim)
       const tilt = -Math.min(12 * DEG, fly.lean * 0.5);
       let pt = tilt + look.pitch, yw = Math.atan2(Math.sin(look.yaw), Math.cos(look.yaw));
-      const e = (yw / GUNDAM_REACH.yaw) ** 2 + (pt / (pt >= 0 ? GUNDAM_REACH.up : GUNDAM_REACH.down)) ** 2;
+      // ... and never so far that the scope (held at the weapon's reach) leaves the screen (4.5 deg margin)
+      const H0 = HEAD_RANGE[fly.character] || HEAD_RANGE.gundam, fy = camera.frustum && camera.frustum.fovy ? camera.frustum.fovy / 2 : 20 * DEG;
+      const fx = Math.atan(Math.tan(fy) * (scene.canvas.clientWidth / Math.max(1, scene.canvas.clientHeight))), m = 4.5 * DEG;
+      const HR = { yaw: Math.min(H0.yaw, GUNDAM_REACH.yaw + fx - m), up: Math.min(H0.up, GUNDAM_REACH.up + fy - m), down: Math.min(H0.down, GUNDAM_REACH.down + fy - m) };
+      const e = (yw / HR.yaw) ** 2 + (pt / (pt >= 0 ? HR.up : HR.down)) ** 2;
       if (e > 0.94) { const k = Math.sqrt(0.94 / e); yw *= k; pt *= k; look.yaw = yw; look.pitch = pt - tilt; }   // (just inside the edge)
       camera.setView({ destination: C.Cartesian3.fromDegrees(eye.lon, eye.lat, fly.h + ch.eye),
         orientation: { heading: fly.az * DEG + yw, pitch: pt, roll: fly.bank * 0.5 } });
@@ -1586,6 +1590,8 @@ void main() {
   // the head's line. Outside the cockpit it keeps its own neck reach and wind-up (and the Gundam follows its rules).
   const GUNDAM_REACH = { yaw: 25 * DEG, up: 20 * DEG, down: 15 * DEG };
   const cockpitView = () => CAMS[fly.cam].range === 0;
+  // how far each character's head turns from where the body faces (the cockpit view's look-around range)
+  const HEAD_RANGE = { gundam: { yaw: 60 * DEG, up: 30 * DEG, down: 30 * DEG }, dragon: D_AIM };
   const dragonReach = () => (cockpitView() ? GUNDAM_REACH : D_AIM);
   function dragonAim(dt) {
     const t = fly.fireT === undefined ? 99 : fly.fireT;
@@ -1696,7 +1702,26 @@ void main() {
     else { const d = h === null && fly.aimT ? C.Cartesian3.distance(cray.origin, fly.aimT) : W.range;   // unknown on the CPU: keep the distance
       T = C.Cartesian3.add(cray.origin, C.Cartesian3.multiplyByScalar(cray.direction, d, new C.Cartesian3()), new C.Cartesian3()); hit = h === null ? fly.aimHit || null : null; }
     const toT = C.Cartesian3.subtract(T, eye, new C.Cartesian3());
-    const want = C.Cartesian3.magnitude(toT) > D + 0.5 ? C.Cartesian3.normalize(toT, toT) : C.Cartesian3.clone(cray.direction);
+    let want = C.Cartesian3.magnitude(toT) > D + 0.5 ? C.Cartesian3.normalize(toT, toT) : C.Cartesian3.clone(cray.direction);
+    fly.aimPinned = false;
+    if (cockpit) {
+      // looking beyond the weapon's reach (25 deg to either side, 20 up, 15 down from where the body faces): the aim stops at
+      // the edge of that scope, and the target is what lies along the held direction
+      const inv = C.Matrix4.inverseTransformation(C.Transforms.eastNorthUpToFixedFrame(eye), new C.Matrix4()), enu = C.Transforms.eastNorthUpToFixedFrame(eye);
+      const l = C.Matrix4.multiplyByPointAsVector(inv, want, new C.Cartesian3());
+      let yo = Math.atan2(l.x, l.y) - fly.az * DEG; yo = Math.atan2(Math.sin(yo), Math.cos(yo));
+      let pt = Math.atan2(l.z, Math.hypot(l.x, l.y));
+      const e = (yo / GUNDAM_REACH.yaw) ** 2 + (pt / (pt >= 0 ? GUNDAM_REACH.up : GUNDAM_REACH.down)) ** 2;
+      if (e > 1) {
+        const k = Math.sqrt(0.97 / e); yo *= k; pt *= k; fly.aimPinned = true;
+        const yw = fly.az * DEG + yo;
+        want = C.Cartesian3.normalize(C.Matrix4.multiplyByPointAsVector(enu, new C.Cartesian3(Math.sin(yw) * Math.cos(pt), Math.cos(yw) * Math.cos(pt), Math.sin(pt)), new C.Cartesian3()), new C.Cartesian3());
+        const R0 = C.Cartesian3.add(eye, C.Cartesian3.multiplyByScalar(want, D, new C.Cartesian3()), new C.Cartesian3()), h0 = cpuRay(new C.Ray(R0, want), W.range + 200, false);
+        T = h0 ? C.Cartesian3.clone(h0.position) : C.Cartesian3.add(R0, C.Cartesian3.multiplyByScalar(want, h0 === null && fly.aimT ? Math.max(D, C.Cartesian3.distance(R0, fly.aimT)) : W.range, new C.Cartesian3()), new C.Cartesian3());
+        hit = h0 ? { position: T, cpu: true } : null;
+      }
+      fly.aimAnchor = C.Cartesian3.add(eye, C.Cartesian3.multiplyByScalar(want, 1000, new C.Cartesian3()), new C.Cartesian3());   // the scope ring's centre
+    }
     if (dt !== undefined) {
       if (cockpit && fly.aimDir && fly.aimEyePrev && fly.aimCockpit) {
         const k = 1 - Math.exp(-dt / 0.15);
@@ -1731,7 +1756,8 @@ void main() {
     clampCockpitCrosshair(w);
     fly.crosshairXY = [Math.max(16, Math.min(cv.clientWidth - 16, w.x)), Math.max(16, Math.min(cv.clientHeight - 16, w.y))];
     crosshairEl.style.left = fly.crosshairXY[0] + "px"; crosshairEl.style.top = fly.crosshairXY[1] + "px";
-    // cockpit: the aiming scope, a green radar ring around the line of sight (a 3.5 deg radius, sized with the
+    // cockpit: the aiming scope, a green radar ring around the aim (the line of sight, held at the weapon's reach when looking
+    // further; a 3.5 deg radius, sized with the
     // camera's field of view so it scales with the screen). The crosshair turns red while it is outside the scope (it lags a
     // fast turn or climb) or while the target is beyond the weapon's reach from where the body faces (the rifle turns 25 deg
     // to either side, 20 up and 15 down; the dragon's head 35, 30 and 25), e.g. when looking around.
@@ -1739,25 +1765,22 @@ void main() {
     scopeEl.hidden = !cockpit;
     let out = false;
     if (cockpit && camera.frustum && camera.frustum.fovy && fly.aimR) {
-      const fpx = (cv.clientHeight / 2) / Math.tan(camera.frustum.fovy / 2), r = fpx * Math.tan(3.5 * DEG), cx = cv.clientWidth / 2, cy = cv.clientHeight / 2;
-      scopeEl.style.left = (cx - r) + "px"; scopeEl.style.top = (cy - r) + "px"; scopeEl.style.width = scopeEl.style.height = 2 * r + "px";
-      const outside = Math.hypot(w.x - cx, w.y - cy) > r;
-      const L = GUNDAM_REACH;   // both characters have the rifle's reach in the cockpit view
-      const eye = camera.positionWC, inv = C.Matrix4.inverseTransformation(C.Transforms.eastNorthUpToFixedFrame(eye), new C.Matrix4());
-      const l = C.Matrix4.multiplyByPointAsVector(inv, C.Cartesian3.subtract(fly.aimR, eye, new C.Cartesian3()), new C.Cartesian3());
-      let yo = Math.atan2(l.x, l.y) - fly.az * DEG; yo = Math.atan2(Math.sin(yo), Math.cos(yo));
-      const pt = Math.atan2(l.z, Math.hypot(l.x, l.y)), py = pt >= 0 ? L.up : L.down;
-      out = outside || (yo / L.yaw) ** 2 + (pt / py) ** 2 > 1;
+      const c = scopeCentre(), r = scopeRadius();
+      if (c) { scopeEl.style.left = (c.x - r) + "px"; scopeEl.style.top = (c.y - r) + "px"; scopeEl.style.width = scopeEl.style.height = 2 * r + "px"; }
+      out = !!fly.aimPinned || (c && Math.hypot(w.x - c.x, w.y - c.y) > r * 1.01);
     }
     crosshairEl.classList.toggle("out", out); scopeEl.classList.toggle("alert", out); fly.crosshairOut = out;
   }
   const scopeEl = $("aimScope");
+  // the scope ring: around the aim direction held within the weapon's reach (the screen centre unless looking beyond it)
+  const scopeRadius = () => (scene.canvas.clientHeight / 2) / Math.tan(camera.frustum.fovy / 2) * Math.tan(3.5 * DEG);
+  const scopeCentre = () => { const cv = scene.canvas; return fly.aimAnchor ? C.SceneTransforms.worldToWindowCoordinates(scene, fly.aimAnchor) || { x: cv.clientWidth / 2, y: cv.clientHeight / 2 } : { x: cv.clientWidth / 2, y: cv.clientHeight / 2 }; };
   // cockpit: the crosshair as drawn never leaves the scope ring (whatever moved it: lag, turning, the view): it is held at
   // the ring's edge, and the aim point and target are taken through the held position, so shots still go where it shows
   function clampCockpitCrosshair(w) {
     if (CAMS[fly.cam].range !== 0 || !camera.frustum || !camera.frustum.fovy) return w;
-    const cv = scene.canvas, cx = cv.clientWidth / 2, cy = cv.clientHeight / 2;
-    const r = (cv.clientHeight / 2) / Math.tan(camera.frustum.fovy / 2) * Math.tan(3.5 * DEG) * 0.97, d = Math.hypot(w.x - cx, w.y - cy);
+    const c0 = scopeCentre(), cx = c0.x, cy = c0.y;
+    const r = scopeRadius() * 0.97, d = Math.hypot(w.x - cx, w.y - cy);
     if (d <= r) return w;
     w.x = cx + (w.x - cx) * r / d; w.y = cy + (w.y - cy) * r / d;
     const W = WEAPONS[fly.character || "gundam"], D = AIM_AHEAD[fly.character] || 5, ray = camera.getPickRay(new C.Cartesian2(w.x, w.y));
