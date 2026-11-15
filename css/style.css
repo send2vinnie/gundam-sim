@@ -138,6 +138,9 @@ dialog a { color: var(--accent); }
 .aim-scope[hidden] { display: none; }
 .fire-btn { right: auto; left: 50%; transform: translateX(-50%); bottom: calc(40px + env(safe-area-inset-bottom)); background: rgba(240,120,30,.6); }
 .fire-btn.on { background: rgba(255,170,60,.95); }
+.rest-btn { bottom: calc(160px + env(safe-area-inset-bottom)); width: 64px; height: 64px; font-size: 11px; background: rgba(60,120,220,.55); }
+.rest-btn[hidden] { display: none; }
+@media (max-width: 700px) { .rest-btn { bottom: calc(135px + env(safe-area-inset-bottom)); width: 60px; height: 60px; font-size: 10px; padding: 0; } }
 #rebuildBtn { width: 100%; margin-top: 8px; }
 #hudBoost { height: 100%; width: 100%; background: #ffcf6e; }
 #hudBoost.low { background: #ff5a5a; }

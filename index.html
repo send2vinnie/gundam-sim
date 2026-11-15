@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Widgets/widgets.css">
-<link rel="stylesheet" href="css/style.css?v=58">
+<link rel="stylesheet" href="css/style.css?v=59">
 <script src="https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Cesium.js"></script>
 </head>
 <body>
@@ -93,6 +93,7 @@
   <div class="stick" id="stickR"><div class="knob"></div><span>UP·DOWN / STRAFE</span></div>
   <button id="boostBtn" class="touch-btn">BOOST</button>
   <button id="fireBtn" class="touch-btn fire-btn">FIRE</button>
+  <button id="restBtn" class="touch-btn rest-btn" hidden>KNEEL</button>
 </section>
 
 <!-- Pause menu -->
@@ -173,6 +174,7 @@
           <li><b>Shift</b> boost</li>
           <li><b>F</b> or <b>left click</b> fire (Gundam: beam rifle · dragon: fireball)</li>
           <li><b>V</b> camera · mouse drag to look · wheel to zoom</li>
+          <li><b>P</b> on the ground: Gundam kneels to aim behind its shield · dragon folds its wings and lies down (P again, or move, to get up)</li>
           <li><b>Esc</b> pause menu</li>
           <li><b>On foot</b> (HUD shows WALK after a slow landing on the ground or a roof): <b>W / S</b> walk · <b>Shift</b> run · <b>A / D</b> turn · <b>Q / E</b> sidestep · <b>Space</b> jump and take off · fire as usual</li>
           <li>Difficulty (start screen or Settings): <b>Easy</b> arcade · <b>Medium</b> · <b>Hard</b> - full gravity and momentum; turn by banking (A/D rolls, the bank stays until you roll back); boost drains the BOOST gauge</li>
@@ -183,14 +185,14 @@
           <li>Right stick: turn / look up-down</li>
           <li>RT ascend · LT descend</li>
           <li>A (hold) boost · Y camera · Start pause</li>
-          <li>RB or X fire</li>
+          <li>RB or X fire · B kneel / rest (on the ground)</li>
           <li>On foot: the same sticks walk, turn and sidestep · A (hold) run · RT jump and take off</li>
         </ul></div>
       <div><h3>Touch (Android)</h3>
         <ul>
           <li>Left stick: forward/back and turn</li>
           <li>Right stick: up/down and strafe</li>
-          <li>BOOST (hold) · FIRE · ◎ camera · ☰ menu</li>
+          <li>BOOST (hold) · FIRE · ◎ camera · ☰ menu · KNEEL / REST (on the ground)</li>
           <li>Drag empty screen to look around</li>
           <li>On foot: left stick walks and turns · BOOST runs · right stick sidesteps, push up to jump and take off</li>
         </ul></div>
@@ -214,6 +216,6 @@
   </form>
 </dialog>
 
-<script src="js/app.js?v=58"></script>
+<script src="js/app.js?v=59"></script>
 </body>
 </html>
