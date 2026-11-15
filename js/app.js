@@ -1710,6 +1710,9 @@ void main() {
   const AIM_AHEAD = { gundam: 5, dragon: 1 };
   function aimEye() {   // the eyes as drawn (they move with the body lean and bank)
     const ch = CH();
+    // cockpit view: the eyes are the camera (with its step bob, nod and kneeling height), so the crosshair and the target
+    // line up exactly on screen
+    if (state.mode === "fly" && CAMS[fly.cam].range === 0) return C.Cartesian3.clone(camera.positionWC);
     if (fly.model && fly.model.modelMatrix) return toWorld(fly.model.modelMatrix, [ch.eyeFwd, 0, ch.eye]);
     const s = Math.sin(fly.az * DEG), c = Math.cos(fly.az * DEG), e = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
     return C.Cartesian3.fromDegrees(e.lon, e.lat, fly.h + ch.eye);
@@ -1993,6 +1996,9 @@ void main() {
     const dragon = fly.character === "dragon", run = fly.gaitRun || 0, ph = fly.walkPhase || 0, inside = CAMS[fly.cam].range === 0, out = inside ? 1 : 0.3;
     const roll = (dragon ? 1.6 + 1.2 * run : 2.5 + 2 * run) * DEG * Math.sin(ph) * k * out;
     const dip = (dragon ? 0.08 + 0.06 * run : 0.35 + 0.25 * run) * Math.pow(Math.abs(Math.sin(ph)), 4) * k * out;   // footfalls at sin = +-1
+    // cockpit only: the view also nods down at each footfall and comes back up (a heavier nod for the Gundam)
+    const nod = inside ? (dragon ? 1.2 + 0.8 * run : 2 + 1.5 * run) * DEG * Math.pow(Math.abs(Math.sin(ph)), 4) * k : 0;
+    if (nod) camera.lookDown(nod);
     camera.twistRight(roll); camera.moveDown(dip);
   }
   function applyShake(dt) {
