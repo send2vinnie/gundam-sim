@@ -212,8 +212,8 @@ lurch forward, no control), then it walks.
   the right knee raised with the foot planted, the shield arm bent in a V so the shield guards the body, the rifle arm
   raised level and the head leaning right toward the sight; the body drops so the knee rests on the ground and the
   cockpit eye drops with it. Aiming and firing work as usual (`KNEEL_POSE`). The **dragon** crouches low (body level,
-  legs folded under it, head a little down) with its wings spread and brought forward over the rider, arching around
-  and in front of it as a shield with the tips almost meeting above the head (held still); fireballs still leave the mouth with the usual aim rules (`DRAGON_REST`).
+  legs folded under it, head a little down) with its wings brought up and in over the rider, the wing claws on top
+  pointing up and almost meeting above the rider's head, the membranes draped down around the rider as a shield (held still); fireballs still leave the mouth with the usual aim rules (`DRAGON_REST`).
 * **Camera sway:** the camera rolls side to side with each step and dips a little at each footfall: in the cockpit
   view about 1.5° walking and 2.7° running for the heavy Gundam (with a deeper dip), 1.6° / 2.8° for the lighter dragon;
   in the outside views about 0.8° / 1.5° for the Gundam and a third of the cockpit amount for the dragon. In the cockpit view the view also nods down at each footfall and back

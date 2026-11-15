@@ -72,10 +72,11 @@
   const DRAGON_WALK_RAISE = 25 * DEG;   // on foot the body is raised from the flight attitude to stand (30 deg forward lean)
   const DRAGON_WALK_HEAD_TILT = 12 * DEG;
   // resting (P on the ground): the body comes down from standing to level and lower, legs crouched under it (thigh
-  // forward, knee bent, foot flat), wings spread, raised, swept and tipped forward over the rider so they arch around and in
-  // front of it as a shield (held still; the tips almost meet above the head, which stays clear to fire), head
+  // forward, knee bent, foot flat), wings brought up and in over the rider with the wing claws on top, pointing up and almost
+  // meeting above the rider's head, the membranes draped down around the rider as a shield (held still; the dragon's
+  // head stays clear to fire), head
   // lowered a little
-  const DRAGON_REST = { hip: -60 * DEG, knee: 120 * DEG, ankle: -60 * DEG, wing: 50 * DEG, sweep: 65 * DEG, wingTilt: -60 * DEG, head: -12 * DEG, lean: 4 * DEG };   // at most this much head tilt to compensate, so the horns stay close to the rider's hands
+  const DRAGON_REST = { hip: -60 * DEG, knee: 120 * DEG, ankle: -60 * DEG, wing: -30 * DEG, sweep: -40 * DEG, wingTilt: 45 * DEG, head: -12 * DEG, lean: 4 * DEG };   // at most this much head tilt to compensate, so the horns stay close to the rider's hands
   const CHARACTERS = {
     gundam: { name: "Gundam RX-78-02 (18 m)", leanMax: 55, phys: { mass: 43.4, thrust: 7, climb: 5, rollRate: 45 * DEG, lift: "thrusters", stall: 0 }, center: MS_CENTER, eye: 16.6, eyeFwd: 1.5, height: MS_HEIGHT, unit: "MS height", cams: [55, 160, 45],
       // walking (m/s, deg/s, m): run = Shift; step = highest ledge it steps onto (higher blocks), drop = edge it walks off,
