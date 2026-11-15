@@ -84,10 +84,11 @@ Pick one on the start screen (**Character**), remembered between visits.
 Airborne, the Gundam holds a flight pose (first matched to a reference figure photo, then adjusted): the body leans
 well forward as it flies (about 25° hovering, 45° at slow cruise, 55° at full speed, 75° on boost; less when climbing),
 the neck takes back the whole lean plus 15° (up to 80°) so the head looks up along the flight path, the rifle arm is
-raised with the fist at about head height (135° forward of the torso, following the lean), and the beam rifle is turned at
-the fist so its barrel stays level along the flight direction whatever the arm angle and lean. When you fire, the rifle
-lines up with the arm again and the arm swings to the crosshair as before; the beam leaves from the rifle's muzzle wherever
-it points. The shield arm hangs at its side swung a little back with the armpit open 30° and the shield face out, and both
+forward with the fist at chest/shoulder height (100° forward of the torso, following the lean), and the beam rifle is
+turned at the fist so its barrel stays level along the heading. When you fire, the arm lifts a little and the rifle turns
+at the fist to the crosshair target; the beam leaves from the muzzle once the barrel points there (within 2°, a few
+frames) and flies along the barrel to the target, then the rifle eases back to level. On foot the arm still swings up to
+aim, with the rifle lined up on the target the same way. The shield arm hangs at its side swung a little back with the armpit open 30° and the shield face out, and both
 legs trail back and out, stretched with the knees slightly bent and the feet pointed (the right a touch less than the
 left). The pose is set on the model's joints at run time, so it is the same on all three detail levels and the scale is
 unchanged; it blends out on the ground, so standing and walking look as before (`FLIGHT_POSE` in `js/app.js`). The
