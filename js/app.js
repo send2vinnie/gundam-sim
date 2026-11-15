@@ -1846,7 +1846,10 @@ void main() {
     }
     if (!dragon && fly.model) {
       const bw = rifleBarrelWorld(), toT = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, from, new C.Cartesian3()), new C.Cartesian3());
-      if (C.Cartesian3.angleBetween(bw, toT) > 2 * DEG) {   // outside the rifle's reach: fire along the barrel
+      // outside the rifle's reach: fire along the barrel. (The rifle counts as aimed within 2 deg of the target as seen from
+      // the fist; seen from the muzzle that can read a little over 2 deg, so the margin here is wider: a shot the rifle has
+      // aimed always goes to the crosshair target.)
+      if (C.Cartesian3.angleBetween(bw, toT) > 6 * DEG) {
         const ray = new C.Ray(from, bw); let h = cpuRay(ray, W.range + 200, false);
         fly.fireTarget = h ? h.position : C.Cartesian3.add(from, C.Cartesian3.multiplyByScalar(bw, h === null ? C.Cartesian3.distance(from, fly.fireTarget) : W.range, new C.Cartesian3()), new C.Cartesian3());
         fly.fireHit = h ? { position: h.position, cpu: true } : null;
