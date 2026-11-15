@@ -1960,6 +1960,18 @@ void main() {
       if (e.t >= e.life) { if (e.sys) scene.primitives.remove(e.sys); if (e.point) glowPoints.remove(e.point); effects.splice(i, 1); }
     }
   }
+  // walking: the camera tilts from side to side with each step and dips a little at each footfall, synced to the gait
+  // (the Gundam heavier and slower, the dragon lighter); strongest in the cockpit view, much subtler outside. It follows the
+  // walking blend, so it fades in and out as the character starts and stops, and there is none in flight. The crosshair
+  // and aim are worked out from this final camera, so shots still land under the crosshair.
+  function applyWalkSway() {
+    const k = (fly.walking ? 1 : 0) * Math.min(1, fly.gait || 0) * (fly.walkBlend || 0);
+    if (state.mode !== "fly" || k < 0.01) return;
+    const dragon = fly.character === "dragon", run = fly.gaitRun || 0, ph = fly.walkPhase || 0, inside = CAMS[fly.cam].range === 0, out = inside ? 1 : 0.3;
+    const roll = (dragon ? 1.6 + 1.2 * run : 2.5 + 2 * run) * DEG * Math.sin(ph) * k * out;
+    const dip = (dragon ? 0.08 + 0.06 * run : 0.35 + 0.25 * run) * Math.pow(Math.abs(Math.sin(ph)), 4) * k * out;   // footfalls at sin = +-1
+    camera.twistRight(roll); camera.moveDown(dip);
+  }
   function applyShake(dt) {
     if (shake <= 0.001 || !settings.camShake) { shake = 0; return; }
     // a small jitter in yaw and pitch only (no roll): at most about 0.3 deg, fading in about half a second
@@ -2279,7 +2291,7 @@ void main() {
     if (state.mode === "fly") {
       updateFlight(dt); if (PROF) t0 = PROF.add("flight", t0);
       updateWeapons(dt); updateThrusters(dt); if (PROF) t0 = PROF.add("weapons+fx", t0);
-      updateCamera(dt); applyShake(dt); updateCrosshair(dt); if (PROF) t0 = PROF.add("camera", t0);
+      updateCamera(dt); applyWalkSway(); applyShake(dt); updateCrosshair(dt); if (PROF) t0 = PROF.add("camera", t0);
     }
     else if (state.mode === "lobby" && lobby.active) { readInput(); lobbyCamera(dt); if (PROF) t0 = PROF.add("lobby", t0); }
     else if (state.mode === "pause") readInput();
