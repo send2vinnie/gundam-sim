@@ -1445,7 +1445,10 @@ void main() {
         // walking: the head nods with each step and the tail sways from side to side
         const nod = Math.sin(fly.walkPhase * 2) * 4 * DEG * fly.gait, sway = Math.sin(fly.walkPhase) * 16 * DEG * fly.gait;
         fly.headTilt = Math.min(raise, DRAGON_WALK_HEAD_TILT);
-        poseDragon(fly.model, fly.headYaw * 0.7, fly.headPitch * 0.7 + fa[0] + nod, fly.wingAmp * Math.sin(fly.wingPhase) + fold + fa[1], -fly.headYaw * 0.6 + sway,
+        const da = dragonAim(dt), keep = 1 - Math.min(1, da.w);   // while aiming, the head follows the aim instead of the turn
+        const hy = fly.headYaw * 0.7 * keep + da.yaw, hp = fly.headPitch * 0.7 * keep + fa[0] + nod + da.pitch;
+        fly.dHead = { yaw: hy, pitch: hp, tilt: fly.headTilt }; fly.dHeadFa = fa[0];
+        poseDragon(fly.model, hy, hp, fly.wingAmp * Math.sin(fly.wingPhase) + fold + fa[1], -fly.headYaw * 0.6 + sway,
           { tilt: fly.headTilt, legs: fly.dragonLegs || [0, 0, 0, 0, 0, 0] });
       } else {
         // while aiming, the head looks along the line of fire
@@ -1553,13 +1556,48 @@ void main() {
     const r = C.Matrix3.multiplyByVector(R, new C.Cartesian3(MUZZLE[0] - RIFLE_GRIP[0], MUZZLE[1] - RIFLE_GRIP[1], MUZZLE[2] - RIFLE_GRIP[2]), new C.Cartesian3());
     return handToWorld(A, F, [r.x + RIFLE_GRIP[0], r.y + RIFLE_GRIP[1], r.z + RIFLE_GRIP[2]]);
   }
+  // the mouth as drawn: the head's pose (yaw, pitch and walking tilt, as last given to poseDragon) turns it about the neck
+  // joint; flight frame -> native, turn about the joint, -> model space -> world
   function dragonMouthWorld() {
-    const s = DRAGON_SCALE, m = DRAGON_MOUTH;
-    if (!fly.headTilt) return toWorld(fly.model.modelMatrix, [m[0] * s, -m[2] * s, m[1] * s]);
-    // walking: the head is tilted down about its joint; flight frame -> native, turn about the head joint, -> model space
-    const R = DRAGON_ROOT, d = [m[0] - R[12], m[1] - R[13], m[2] - R[14]];
+    const m = DRAGON_MOUTH, R = DRAGON_ROOT, d = [m[0] - R[12], m[1] - R[13], m[2] - R[14]], J = DRAGON_JOINTS.head;
     const n = [R[0] * d[0] + R[1] * d[1] + R[2] * d[2], R[4] * d[0] + R[5] * d[1] + R[6] * d[2], R[8] * d[0] + R[9] * d[1] + R[10] * d[2]];
-    return toWorld(fly.model.modelMatrix, dragonNativeToModel(rotXAbout(n, DRAGON_JOINTS.head.p, fly.headTilt)));
+    const h = fly.dHead || { yaw: 0, pitch: 0, tilt: fly.headTilt || 0 };
+    // the head's extra turn from its resting pose: yaw about flight-up, then pitch (and tilt) about the lateral axis
+    const q = C.Quaternion.multiply(axisQ(D_UP, -h.yaw, new C.Quaternion()), axisQ([1, 0, 0], -h.pitch * 0.8 + h.tilt, new C.Quaternion()), new C.Quaternion());
+    const v = C.Matrix3.multiplyByVector(C.Matrix3.fromQuaternion(q), new C.Cartesian3(n[0] - J.p[0], n[1] - J.p[1], n[2] - J.p[2]), new C.Cartesian3());
+    return toWorld(fly.model.modelMatrix, dragonNativeToModel([v.x + J.p[0], v.y + J.p[1], v.z + J.p[2]]));
+  }
+  const dragonNeckWorld = () => toWorld(fly.model.modelMatrix, dragonNativeToModel(DRAGON_JOINTS.head.p));
+  const dragonHeadDir = () => C.Cartesian3.normalize(C.Cartesian3.subtract(dragonMouthWorld(), dragonNeckWorld(), new C.Cartesian3()), new C.Cartesian3());
+  // aiming the fireball with the head: while a shot is coming, the head turns so its aim line (neck -> mouth) points at
+  // the target, within a natural neck range (35 deg to either side, 30 up, 25 down from straight ahead). A target further
+  // to the side turns the whole dragon toward it (the camera keeps its view); it never turns its head backwards. After the
+  // shot the head jerks back a little (recoil) and then eases back to its flight pose.
+  const D_AIM = { yaw: 35 * DEG, up: 30 * DEG, down: 25 * DEG };   // yaw kept to 35 deg so the rider's arms (on the horns) are not stretched
+  function dragonAim(dt) {
+    const t = fly.fireT === undefined ? 99 : fly.fireT;
+    fly.dAimYaw = fly.dAimYaw || 0; fly.dAimPitch = fly.dAimPitch || 0;
+    if (!fly.fireDone && t < 1 && fly.fireTarget && fly.model) {
+      const N = dragonNeckWorld(), enu = C.Transforms.eastNorthUpToFixedFrame(N), inv = C.Matrix4.inverseTransformation(enu, new C.Matrix4());
+      const ang = (v) => { const l = C.Matrix4.multiplyByPointAsVector(inv, v, new C.Cartesian3()); return [Math.atan2(l.x, l.y), Math.asin(Math.max(-1, Math.min(1, l.z / C.Cartesian3.magnitude(l))))]; };
+      // where the head would point without the rear-back/lunge (that plays on top and is straight again at release)
+      const saved = fly.dHead; if (saved) fly.dHead = { yaw: saved.yaw, pitch: saved.pitch - (fly.dHeadFa || 0), tilt: saved.tilt };
+      const want = ang(C.Cartesian3.subtract(fly.fireTarget, N, new C.Cartesian3())), now = ang(dragonHeadDir());
+      fly.dHead = saved;
+      // the body turns toward a target beyond the neck's reach (up to 400 deg/s)
+      let off = want[0] - fly.az * DEG; off = Math.atan2(Math.sin(off), Math.cos(off));
+      if (Math.abs(off) > D_AIM.yaw && Math.abs(off) < 170 * DEG) { const step = Math.sign(off) * Math.min(Math.abs(off) - D_AIM.yaw, 400 * DEG * dt);
+        fly.az = ((fly.az + step / DEG) % 360 + 360) % 360; look.yaw -= step; }
+      let ey = want[0] - now[0]; ey = Math.atan2(Math.sin(ey), Math.cos(ey));
+      const ep = want[1] - now[1], k = 1 - Math.exp(-dt * 30);   // close most of the error each frame (about 0.1 s in all)
+      fly.dAimYaw = Math.max(-D_AIM.yaw, Math.min(D_AIM.yaw, fly.dAimYaw + ey * k));
+      fly.dAimPitch = Math.max(-D_AIM.down, Math.min(D_AIM.up, fly.dAimPitch + ep / 0.8 * k));
+    } else if (t > 0.6) {   // back to the flight pose
+      const k = 1 - Math.exp(-dt * 5); fly.dAimYaw -= fly.dAimYaw * k; fly.dAimPitch -= fly.dAimPitch * k;
+    }
+    // recoil after the fireball leaves: the head jerks back (up) about 10 deg, settling within about 300 ms
+    let r = 0; if (fly.dRecoilT !== undefined) { fly.dRecoilT += dt; const T = fly.dRecoilT; r = T < 0.05 ? T / 0.05 : Math.exp(-(T - 0.05) / 0.09); }
+    return { yaw: fly.dAimYaw, pitch: fly.dAimPitch + 10 * DEG * r, w: Math.min(1, Math.abs(fly.dAimYaw) / (10 * DEG) + (t < 1 ? 1 : 0)) };
   }
   // at most MAX_FX particle systems at once (flashes do not count); the oldest goes first
   function addEffect(sys, life, isDust) {
@@ -1647,6 +1685,18 @@ void main() {
     if (fly.character !== "dragon") { fly.recoil0 = fly.recoil || 0; fly.recoilA = Math.min(1.6, fly.recoil0 + 1); fly.recoilT = 0; }   // recoil: rapid shots stack a little, capped
     const W = WEAPONS[fly.character || "gundam"], dragon = fly.character === "dragon";
     const from = dragon ? dragonMouthWorld() : gundamMuzzleWorld(fly.armAngle || 0);
+    if (dragon && fly.model) {
+      fly.dRecoilT = 0;
+      // the head's aim line without the lunge (it is straight again as the fireball leaves)
+      const saved = fly.dHead; if (saved) fly.dHead = { yaw: saved.yaw, pitch: saved.pitch - (fly.dHeadFa || 0), tilt: saved.tilt };
+      const hd = dragonHeadDir(); fly.dHead = saved;
+      const toT = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, from, new C.Cartesian3()), new C.Cartesian3());
+      if (C.Cartesian3.angleBetween(hd, toT) > 2 * DEG) {   // out of the neck's reach: the fireball goes where the head points
+        const ray = new C.Ray(from, hd); const h = cpuRay(ray, W.range + 200, false);
+        fly.fireTarget = h ? h.position : C.Cartesian3.add(from, C.Cartesian3.multiplyByScalar(hd, h === null ? C.Cartesian3.distance(from, fly.fireTarget) : W.range, new C.Cartesian3()), new C.Cartesian3());
+        fly.fireHit = h ? { position: h.position, cpu: true } : null;
+      }
+    }
     if (!dragon && fly.model) {
       const bw = rifleBarrelWorld(), toT = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, from, new C.Cartesian3()), new C.Cartesian3());
       if (C.Cartesian3.angleBetween(bw, toT) > 2 * DEG) {   // outside the rifle's reach: fire along the barrel
@@ -1655,7 +1705,7 @@ void main() {
         fly.fireHit = h ? { position: h.position, cpu: true } : null;
       }
     }
-    if (fly.model) fly.lastLaunch = { from: C.Cartesian3.clone(from), barrel: dragon ? null : rifleBarrelWorld(), target: C.Cartesian3.clone(fly.fireTarget), t: fly.fireT,   // for tests
+    if (fly.model) fly.lastLaunch = { from: C.Cartesian3.clone(from), barrel: dragon ? dragonHeadDir() : rifleBarrelWorld(), lunge: dragon ? fly.dHeadFa || 0 : 0, target: C.Cartesian3.clone(fly.fireTarget), t: fly.fireT,   // for tests
       px: (() => { const w = C.SceneTransforms.worldToWindowCoordinates(scene, fly.fireTarget); return w ? Math.hypot(w.x - scene.canvas.clientWidth / 2, w.y - scene.canvas.clientHeight / 2) : null; })() };
     const dir = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, from, new C.Cartesian3()), new C.Cartesian3());
     const dist = C.Cartesian3.distance(from, fly.fireTarget);
@@ -1687,7 +1737,7 @@ void main() {
   function updateWeapons(dt) {
     fireCooldown = Math.max(0, fireCooldown - dt);
     if (fly.fireT !== undefined && !fly.fireDone && fly.fireT > 0) { const a = crosshairTarget(false); if (a) { fly.fireTarget = a.target; fly.fireHit = a.hit; } }   // the aim follows the crosshair until the shot leaves
-    if (fly.fireT !== undefined) { fly.fireT += dt; if (!fly.fireDone && (fly.character === "dragon" ? fly.fireT >= 0.24 : fly.rifleAimed || fly.fireT >= ((fly.flyPose || 0) > 0.5 ? 0.15 : 0.35))) launch(); }
+    if (fly.fireT !== undefined) { fly.fireT += dt; if (!fly.fireDone && (fly.character === "dragon" ? fly.fireT >= 0.26 && Math.abs(fly.dHeadFa || 0) < 0.01 * DEG : fly.rifleAimed || fly.fireT >= ((fly.flyPose || 0) > 0.5 ? 0.15 : 0.35))) launch(); }
     for (let i = shots.length - 1; i >= 0; i--) {
       const s = shots[i]; const step = Math.min(s.speed * dt, s.dist - s.travelled);
       // impact check along the shot's own path (never skipped): the aim ray at firing time can miss what the projectile
@@ -1961,12 +2011,12 @@ void main() {
     const p0 = handToWorld(A, F, RIFLE_GRIP), p1 = handToWorld(A, F, [RIFLE_GRIP[0] + tip.x, RIFLE_GRIP[1] + tip.y, RIFLE_GRIP[2] + tip.z]);
     return C.Cartesian3.normalize(C.Cartesian3.subtract(p1, p0, p1), p1);
   }
-  function dragonFireAnim() { // [extra head pitch, extra wing] for the rear-back / lunge
+  function dragonFireAnim() { // [extra head pitch, extra wing]: rear back with a wing flare, then snap straight to release
+    // (the head is exactly on its aim line when the fireball leaves; the recoil after it is in dragonAim)
     const t = fly.fireT === undefined ? 99 : fly.fireT;
+    if (fly.fireDone || t >= 0.26) return [0, 0];
     if (t < 0.18) { const u = t / 0.18; return [22 * DEG * u, 30 * DEG * u]; }
-    if (t < 0.4) { const u = (t - 0.18) / 0.22; return [22 * DEG - 40 * DEG * Math.sin(u * Math.PI / 2), 30 * DEG * (1 - u)]; }
-    if (t < 0.8) { const u = (t - 0.4) / 0.4; return [-18 * DEG * (1 - u), 0]; }
-    return [0, 0];
+    const u = (t - 0.18) / 0.08; return [22 * DEG * (1 - Math.sin(u * Math.PI / 2)), 30 * DEG * (1 - u)];
   }
   $("rebuildBtn").onclick = () => { rebuildCity(); };
   $("fireBtn").addEventListener("pointerdown", (e) => { $("fireBtn").classList.add("on"); requestFire(); e.preventDefault(); });
@@ -2098,7 +2148,7 @@ void main() {
   }
 
   // expose for debugging / automated tests
-  window.GFS = { FLIGHT_POSE, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
+  window.GFS = { FLIGHT_POSE, dragonMouthWorld, dragonHeadDir, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
 
   (async () => {
     $("startBtn").disabled = true; $("startBtn").textContent = "Loading…";

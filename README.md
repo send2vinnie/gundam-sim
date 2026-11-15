@@ -207,8 +207,12 @@ lurch forward, no control), then it walks.
 Aim with the crosshair in the middle of the screen and fire (F, left click, gamepad RB/X, or the FIRE button on touch screens).
 * **Gundam - beam rifle:** the right arm swings up to aim along the crosshair (the arm and rifle are a separate part pivoted at
   the shoulder), with a recoil kick, a muzzle flash and the head looking at the target. A pink-white beam bolt flies at 600 m/s.
-* **Dragon - fireball:** the head rears back with a wing flare, then lunges forward and spits a glowing fireball (80 m/s, with
-  a fire trail). The rider keeps both hands on the horns.
+* **Dragon - fireball:** the dragon aims with its head: while the shot is coming it turns its head toward the target
+  under the crosshair within a natural neck range (35° to either side, 30° up, 25° down), and turns its whole body toward a
+  target further to the side (the camera keeps its view); it never turns its head backwards, and a target it can't face is
+  not hit (the fireball goes where the head points). It rears back with a wing flare, snaps straight and the fireball
+  (80 m/s, with a fire trail) leaves the mouth along the head's line, then the head jerks back a little (recoil). The
+  rider keeps both hands on the horns.
 * **Every shot explodes.** Each frame a beam or fireball checks the stretch it is about to fly through (and the street
   below it), so it bursts on the first wall, roof or ground it meets, even if the aim ray at firing time missed it (the
   fireball leaves the dragon's mouth, not the camera; tiles may load after firing). A shot that hits nothing bursts in the
