@@ -1493,8 +1493,15 @@ void main() {
         return;
       }
       const eye = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
+      // looking around (dragging) stays within the weapon's reach from where the body faces: 25 deg to either side, 20 up,
+      // 15 down (an ellipse); dragging further does nothing, so the view, crosshair and scope stop at the edge and every
+      // shot can reach what the crosshair is on
+      const tilt = -Math.min(12 * DEG, fly.lean * 0.5);
+      let pt = tilt + look.pitch, yw = Math.atan2(Math.sin(look.yaw), Math.cos(look.yaw));
+      const e = (yw / GUNDAM_REACH.yaw) ** 2 + (pt / (pt >= 0 ? GUNDAM_REACH.up : GUNDAM_REACH.down)) ** 2;
+      if (e > 0.94) { const k = Math.sqrt(0.94 / e); yw *= k; pt *= k; look.yaw = yw; look.pitch = pt - tilt; }   // (just inside the edge)
       camera.setView({ destination: C.Cartesian3.fromDegrees(eye.lon, eye.lat, fly.h + ch.eye),
-        orientation: { heading: fly.az * DEG + look.yaw, pitch: -Math.min(12 * DEG, fly.lean * 0.5) + look.pitch, roll: fly.bank * 0.5 } });
+        orientation: { heading: fly.az * DEG + yw, pitch: pt, roll: fly.bank * 0.5 } });
       return;
     }
     // chase / far / side distances suit the character's size
@@ -1598,8 +1605,9 @@ void main() {
       let ey = want[0] - now[0]; ey = Math.atan2(Math.sin(ey), Math.cos(ey));
       const ep = want[1] - now[1], k = 1 - Math.exp(-dt * 30);   // close most of the error each frame (about 0.1 s in all)
       fly.dHeadAimed = Math.hypot(ey, ep) < 2 * DEG;   // the head points at the target (used to release in the cockpit view)
-      fly.dAimYaw = Math.max(-RCH.yaw, Math.min(RCH.yaw, fly.dAimYaw + ey * k));
-      fly.dAimPitch = Math.max(-RCH.down, Math.min(RCH.up, fly.dAimPitch + ep / 0.8 * k));
+      // the neck itself can always turn its full range (in the cockpit the view is kept within the rifle's reach instead)
+      fly.dAimYaw = Math.max(-D_AIM.yaw, Math.min(D_AIM.yaw, fly.dAimYaw + ey * k));
+      fly.dAimPitch = Math.max(-D_AIM.down, Math.min(D_AIM.up, fly.dAimPitch + ep / 0.8 * k));
     } else if (t > 0.6) {   // back to the flight pose
       const k = 1 - Math.exp(-dt * 5); fly.dAimYaw -= fly.dAimYaw * k; fly.dAimPitch -= fly.dAimPitch * k;
     }
@@ -1693,6 +1701,9 @@ void main() {
       if (cockpit && fly.aimDir && fly.aimEyePrev && fly.aimCockpit) {
         const k = 1 - Math.exp(-dt / 0.15);
         fly.aimDir = C.Cartesian3.normalize(C.Cartesian3.lerp(fly.aimDir, want, k, new C.Cartesian3()), new C.Cartesian3());
+        // the lag never takes the crosshair out of the scope ring (3.5 deg): it is held at the ring's edge
+        const lagA = C.Cartesian3.angleBetween(fly.aimDir, want), maxA = 3.4 * DEG;
+        if (lagA > maxA) fly.aimDir = C.Cartesian3.normalize(C.Cartesian3.add(want, C.Cartesian3.multiplyByScalar(C.Cartesian3.subtract(fly.aimDir, want, new C.Cartesian3()), maxA / lagA, new C.Cartesian3()), new C.Cartesian3()), new C.Cartesian3());
         fly.aimLag = new C.Cartesian3();   // (a steady flight tilt is no offset: only turning, climbing and diving make it lag)
       } else { fly.aimDir = C.Cartesian3.clone(want); fly.aimLag = new C.Cartesian3(); }
       fly.aimEyePrev = C.Cartesian3.clone(eye); fly.aimCockpit = cockpit;

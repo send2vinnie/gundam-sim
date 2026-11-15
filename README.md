@@ -221,8 +221,10 @@ ahead of the dragon rider's, and the character aims from its eyes through the cr
 side views it shows near the head, not at the screen centre). In the cockpit view the eyes are the camera, so the
 crosshair is centred, but it lags the movement a little (about 0.15 s): turning, climbing or sidestepping fast shifts it
 off centre and it settles back; the aim goes through it as drawn. The cockpit view also shows the aiming scope, a green
-radar ring (3.5° radius) around the line of sight: the crosshair (and the ring) turn red while the crosshair is outside it
-(lagging a fast turn or climb) or while the target is beyond the weapon's reach from where the body faces. The cockpit
+radar ring (3.5° radius) around the line of sight. Looking around (dragging the screen) stays within the weapon's reach
+from where the body faces, 25° to either side, 20° up and 15° down for both characters: past that the view, crosshair and
+ring stop moving. The crosshair's lag never takes it out of the ring, so every beam and fireball goes to the target under
+the crosshair (the crosshair would turn red if it ever could not). The cockpit
 view tilts with at most 12° of the body lean.
 Fire (F, left click, gamepad RB/X, or the FIRE button on touch screens).
 * **Gundam - beam rifle:** the right arm swings up to aim along the crosshair (the arm and rifle are a separate part pivoted at
