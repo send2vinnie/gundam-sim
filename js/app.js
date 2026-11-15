@@ -487,9 +487,8 @@ void main() {
   // the ground and camera checks must not hit our own shots, smoke and flashes: a fireball leaving the dragon's mouth
   // was read as a roof, lifting the dragon (and the camera) for a frame. Hide them for the pick, then show them again.
   function withOwnFxHidden(fn) {
-    const aim = typeof laser === "undefined" ? null : laser;   // the crosshair aim line is never hit either
-    if (typeof effects === "undefined" || (!effects.length && !shots.length && !(aim && aim.show))) return fn();
-    const hidden = [beamLines, glowPoints, aim].concat(effects.map((e) => e.sys), shots.map((x) => x.trail)).filter((p) => p && p.show);
+    if (typeof effects === "undefined" || (!effects.length && !shots.length)) return fn();
+    const hidden = [beamLines, glowPoints].concat(effects.map((e) => e.sys), shots.map((x) => x.trail)).filter((p) => p && p.show);
     for (const p of hidden) p.show = false;
     try { return fn(); } finally { for (const p of hidden) p.show = true; }
   }
@@ -1633,25 +1632,9 @@ void main() {
     if (!(hit && hit.position && target === hit.position)) hit = null;
     return { target, hit, ray };
   }
-  // where the rifle barrel points now: the first surface along the barrel from the muzzle, else the point at full range
-  // (unknown on the CPU: the last distance). This is the crosshair in flight (updateReticle) and the target of each beam.
-  function barrelTarget() {
-    const W = WEAPONS.gundam, from = gundamMuzzleWorld(fly.armAngle || 0), dir = rifleBarrelWorld(), ray = new C.Ray(from, dir);
-    let hit = cpuRay(ray, W.range + 200, false), d;
-    if (hit) { d = hit.distance; hit = { position: hit.position, cpu: true }; }
-    else { d = hit === null && fly.reticleDist ? fly.reticleDist : W.range; hit = null; }
-    fly.reticleDist = d;
-    return { target: C.Cartesian3.add(from, C.Cartesian3.multiplyByScalar(dir, d, new C.Cartesian3()), new C.Cartesian3()), hit, ray, from };
-  }
-  const rifleReticle = () => fly.character !== "dragon" && (fly.flyPose || 0) > 0.5 && CAMS[fly.cam].range !== 0 && !!(fly.model && fly.model.__rifle);
   function requestFire() {
     if (state.mode !== "fly" || !fly.model || fireCooldown > 0) return;
     const W = WEAPONS[fly.character || "gundam"]; fireCooldown = W.cooldown;
-    if (rifleReticle()) {   // flying Gundam: the beam leaves at once along the barrel, to the point under the crosshair
-      const b = fly.reticleHit ? { target: fly.reticle, hit: fly.reticleHit.hit } : barrelTarget();   // exactly the point the crosshair is drawn on
-      fly.aimPitch = 0; fly.fireT = 0; fly.fireTarget = b.target; fly.fireHit = b.hit; fly.fireDone = false; fly.rifleAimed = true;
-      launch(); return;
-    }
     const { target, hit, ray } = crosshairTarget(true);
     // aim pitch (world) for the animation: angle of the line of fire above the horizon
     const up = C.Cartesian3.normalize(fly.model ? C.Matrix4.getTranslation(fly.model.modelMatrix, new C.Cartesian3()) : ray.origin, new C.Cartesian3());
@@ -1664,8 +1647,8 @@ void main() {
     if (fly.character !== "dragon") { fly.recoil0 = fly.recoil || 0; fly.recoilA = Math.min(1.6, fly.recoil0 + 1); fly.recoilT = 0; }   // recoil: rapid shots stack a little, capped
     const W = WEAPONS[fly.character || "gundam"], dragon = fly.character === "dragon";
     const from = dragon ? dragonMouthWorld() : gundamMuzzleWorld(fly.armAngle || 0);
-    if (fly.model) fly.lastLaunch = { reticleXY: fly.reticleXY ? fly.reticleXY.slice() : null, from: C.Cartesian3.clone(from), barrel: dragon ? null : rifleBarrelWorld(), target: C.Cartesian3.clone(fly.fireTarget), t: fly.fireT,   // for tests
-      px: (() => { const w = C.SceneTransforms.worldToWindowCoordinates(scene, fly.fireTarget), c = fly.reticleXY || [scene.canvas.clientWidth / 2, scene.canvas.clientHeight / 2]; return w ? Math.hypot(w.x - c[0], w.y - c[1]) : null; })() };   // vs the crosshair as drawn
+    if (fly.model) fly.lastLaunch = { from: C.Cartesian3.clone(from), barrel: dragon ? null : rifleBarrelWorld(), target: C.Cartesian3.clone(fly.fireTarget), t: fly.fireT,   // for tests
+      px: (() => { const w = C.SceneTransforms.worldToWindowCoordinates(scene, fly.fireTarget); return w ? Math.hypot(w.x - scene.canvas.clientWidth / 2, w.y - scene.canvas.clientHeight / 2) : null; })() };
     const dir = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, from, new C.Cartesian3()), new C.Cartesian3());
     const dist = C.Cartesian3.distance(from, fly.fireTarget);
     if (shots.length >= MAX_SHOTS) {   // too many in the air: the oldest bursts where it is
@@ -1693,21 +1676,6 @@ void main() {
     return h && h.position && C.Cartesian3.distance(h.position, pos) < 8 ? h : null;
   }
   function removeShot(s) { if (s.line) beamLines.remove(s.line); if (s.point) glowPoints.remove(s.point); if (s.trail) scene.primitives.remove(s.trail); }
-  // crosshair: in flight the Gundam's crosshair sits where the rifle barrel points (projected to the screen, lightly
-  // smoothed), with a faint line from the muzzle on Medium/High; otherwise (dragon, on foot, cockpit) at the screen centre
-  const reticleEl = $("crosshair"), laser = LOW_GFX ? null : scene.primitives.add(new C.PolylineCollection());
-  const laserLine = laser ? laser.add({ positions: [C.Cartesian3.ZERO, C.Cartesian3.UNIT_X], width: 1.5, material: C.Material.fromType("Color", { color: C.Color.fromCssColorString("#ff7ad0").withAlpha(0.35) }), show: false }) : null;
-  function updateReticle(dt) {
-    if (!rifleReticle()) { fly.reticleHit = null; if (fly.reticleXY) { reticleEl.style.left = ""; reticleEl.style.top = ""; fly.reticleXY = null; } if (laserLine) laserLine.show = false; return; }
-    const b = barrelTarget(); fly.reticle = b.target; fly.reticleHit = b;
-    const w = C.SceneTransforms.worldToWindowCoordinates(scene, b.target), cv = scene.canvas;
-    if (!w) return;
-    const x = Math.max(16, Math.min(cv.clientWidth - 16, w.x)), y = Math.max(16, Math.min(cv.clientHeight - 16, w.y));
-    const k = 1;   // the barrel itself moves smoothly; the crosshair stays exactly on its line
-    fly.reticleXY = fly.reticleXY ? [fly.reticleXY[0] + (x - fly.reticleXY[0]) * k, fly.reticleXY[1] + (y - fly.reticleXY[1]) * k] : [x, y];
-    reticleEl.style.left = fly.reticleXY[0] + "px"; reticleEl.style.top = fly.reticleXY[1] + "px";
-    if (laserLine) { laserLine.positions = [b.from, b.target]; laserLine.show = true; }
-  }
   function updateWeapons(dt) {
     fireCooldown = Math.max(0, fireCooldown - dt);
     if (fly.fireT !== undefined && !fly.fireDone && fly.fireT > 0) { const a = crosshairTarget(false); if (a) { fly.fireTarget = a.target; fly.fireHit = a.hit; } }   // the aim follows the crosshair until the shot leaves
@@ -1931,24 +1899,14 @@ void main() {
     if (n) n.matrix = C.Matrix4.fromRotationTranslation(armRot, new C.Cartesian3(ARM_PIVOT[0], ARM_PIVOT[1], ARM_PIVOT[2]));
     if (fn) fn.matrix = C.Matrix4.fromRotationTranslation(foreRot, new C.Cartesian3(ELBOW_R[0], ELBOW_R[1], ELBOW_R[2]));
     fly.armRot = armRot; fly.foreRot = fn ? foreRot : C.Matrix3.clone(C.Matrix3.IDENTITY);
-    // rifle (turned at the fist). Flying: the barrel points halfway between level along the heading and the camera's look
-    // direction (at most 20 deg to the side and 15 deg up/down from level), and the crosshair is drawn where it points
-    // (updateReticle), so turning, climbing or looking around aims the rifle and the crosshair together. On foot: it turns
-    // to the crosshair target when firing, and the beam leaves once it points there (see launch).
+    // rifle (turned at the fist): flying, the barrel stays level along the heading; firing (flying or on foot), it turns to
+    // the crosshair target, and the beam leaves once it points there (see launch)
     if (!rn) { fly.rifleRot = C.Matrix3.clone(C.Matrix3.IDENTITY, fly.rifleRot || new C.Matrix3()); fly.rifleAimed = true; return; }
     const G = handToWorld(armRot, fly.foreRot, RIFLE_GRIP);
     const enu = C.Transforms.eastNorthUpToFixedFrame(G, undefined, new C.Matrix4());
     const level = C.Cartesian3.normalize(C.Matrix4.multiplyByPointAsVector(enu, new C.Cartesian3(Math.sin(fly.az * DEG), Math.cos(fly.az * DEG), 0), new C.Cartesian3()), new C.Cartesian3());
     let dir = level, w = fp;
-    if (fp > 0.01) {
-      const cd = camera.directionWC, east = C.Matrix4.multiplyByPointAsVector(enu, C.Cartesian3.UNIT_X, new C.Cartesian3()), north = C.Matrix4.multiplyByPointAsVector(enu, C.Cartesian3.UNIT_Y, new C.Cartesian3()), up = C.Matrix4.multiplyByPointAsVector(enu, C.Cartesian3.UNIT_Z, new C.Cartesian3());
-      const ce = C.Cartesian3.dot(cd, east), cn = C.Cartesian3.dot(cd, north), cu = C.Cartesian3.dot(cd, up);
-      let yawOff = Math.atan2(ce, cn) - fly.az * DEG; yawOff = Math.atan2(Math.sin(yawOff), Math.cos(yawOff));
-      const pitch = Math.asin(Math.max(-1, Math.min(1, cu)));
-      const yw = Math.max(-20 * DEG, Math.min(20 * DEG, yawOff * 0.5)) + fly.az * DEG, pt = Math.max(-15 * DEG, Math.min(15 * DEG, pitch * 0.5));
-      dir = C.Cartesian3.normalize(C.Matrix4.multiplyByPointAsVector(enu, new C.Cartesian3(Math.sin(yw) * Math.cos(pt), Math.cos(yw) * Math.cos(pt), Math.sin(pt)), new C.Cartesian3()), new C.Cartesian3());
-    }
-    if (aiming && fly.fireTarget && fp < 0.5) {
+    if (aiming && fly.fireTarget) {
       const d = C.Cartesian3.normalize(C.Cartesian3.subtract(fly.fireTarget, G, new C.Cartesian3()), new C.Cartesian3());
       if (C.Cartesian3.dot(d, level) > -0.2) { dir = d; w = 1; }   // never twist the wrist to fire backwards
     }
@@ -2039,7 +1997,7 @@ void main() {
     if (state.mode === "fly") {
       updateFlight(dt); if (PROF) t0 = PROF.add("flight", t0);
       updateWeapons(dt); if (PROF) t0 = PROF.add("weapons+fx", t0);
-      updateCamera(dt); applyShake(dt); updateReticle(dt); if (PROF) t0 = PROF.add("camera", t0);
+      updateCamera(dt); applyShake(dt); if (PROF) t0 = PROF.add("camera", t0);
     }
     else if (state.mode === "lobby" && lobby.active) { readInput(); lobbyCamera(dt); if (PROF) t0 = PROF.add("lobby", t0); }
     else if (state.mode === "pause") readInput();
@@ -2110,7 +2068,7 @@ void main() {
   }
 
   // expose for debugging / automated tests
-  window.GFS = { FLIGHT_POSE, barrelTarget, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
+  window.GFS = { FLIGHT_POSE, gundamMuzzleWorld: () => gundamMuzzleWorld(fly.armAngle || 0), rifleBarrelWorld, viewer, fly, lobby, state, input, keys, settings, startFlight, spawns, get destroyed() { let n = 0; for (const s of hiddenFeatures.values()) n += s.size; return n + hiddenOsm.size; }, requestFire, rebuildCity, look, camCol, cpuHeightAt, cpuRay, get lastTap() { return lastTap; }, get prof() { return PROF && PROF.report; }, shots, effects, explode, collapse, beamLines, glowPoints, tilesets, wardSlots, shotLog, get localWorld() { return localWorld; } };
 
   (async () => {
     $("startBtn").disabled = true; $("startBtn").textContent = "Loading…";
