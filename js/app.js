@@ -1394,10 +1394,10 @@ void main() {
     // body attitude: lean into motion, bank into turns (only when airborne)
     const air = fly.grounded ? 0.15 : 1;
     // lean forward with speed, back when climbing and forward when diving
-    // the Gundam leans clearly into flight: 15 deg hovering, about 35 deg at slow cruise, 45 deg at full speed, 60 deg on boost
+    // the Gundam leans well into flight: 25 deg hovering, about 45 deg at slow cruise, 55 deg at full speed, 75 deg on boost
     const fwdT = Math.max(0, Math.min(1, fly.vf / MAX_FWD)), boostT = Math.max(0, Math.min(1, (fly.vf - MAX_FWD) / (MAX_FWD * (BOOST - 1))));
     const leanFwd = fly.character === "dragon" ? (fly.vf / (MAX_FWD * BOOST)) * CH().leanMax
-      : fly.grounded ? (fly.vf / (MAX_FWD * BOOST)) * CH().leanMax : 15 + 30 * Math.sqrt(fwdT) + 15 * boostT - (fly.vf < 0 ? 10 * Math.min(1, -fly.vf / MAX_BACK) : 0);
+      : fly.grounded ? (fly.vf / (MAX_FWD * BOOST)) * CH().leanMax : 25 + 30 * Math.sqrt(fwdT) + 20 * boostT - (fly.vf < 0 ? 10 * Math.min(1, -fly.vf / MAX_BACK) : 0);
     const targetLean = (leanFwd - (fly.vu / (MAX_VERT * 1.8)) * 18) * DEG * air;
     const targetBank = settings.difficulty === "hard" ? (fly.bankH || 0) * air + (fly.vs / MAX_STRAFE) * 8 * DEG * air
       : (fly.yawRate / TURN_RATE) * 22 * DEG * air + (fly.vs / MAX_STRAFE) * 12 * DEG * air;
@@ -1418,7 +1418,7 @@ void main() {
     const kh = 1 - Math.exp(-dt * 5);
     const turn = Math.max(-1, Math.min(1, fly.yawRate / TURN_RATE + 0.35 * fly.vs / MAX_STRAFE));
     fly.headYaw = (fly.headYaw || 0) + (turn * 30 * DEG - (fly.headYaw || 0)) * kh;
-    const headUp = fly.character === "dragon" ? 0 : Math.min(70 * DEG, FLIGHT_POSE.head + Math.max(0, fly.lean)) * (fly.flyPose || 0);   // the neck takes back the whole lean: the face looks along the flight path
+    const headUp = fly.character === "dragon" ? 0 : Math.min(FLIGHT_POSE.headMax, FLIGHT_POSE.head + Math.max(0, fly.lean)) * (fly.flyPose || 0);   // the neck takes back the whole lean: the face looks along the flight path
     fly.headPitch = (fly.headPitch || 0) + (Math.max(-1, Math.min(1, fly.vu / MAX_VERT)) * 12 * DEG + headUp - (fly.headPitch || 0)) * kh;
     if (PROF) tp = PROF.add("flight:physics", tp);
     if (fly.model) {
@@ -1491,7 +1491,7 @@ void main() {
       }
       const eye = offsetLL(fly.lat, fly.lon, s * ch.eyeFwd, c * ch.eyeFwd);
       camera.setView({ destination: C.Cartesian3.fromDegrees(eye.lon, eye.lat, fly.h + ch.eye),
-        orientation: { heading: fly.az * DEG + look.yaw, pitch: -fly.lean * 0.5 + look.pitch, roll: fly.bank * 0.5 } });
+        orientation: { heading: fly.az * DEG + look.yaw, pitch: -Math.min(20 * DEG, fly.lean * 0.5) + look.pitch, roll: fly.bank * 0.5 } });
       return;
     }
     // chase / far / side distances suit the character's size
@@ -1533,6 +1533,7 @@ void main() {
   const WEAPONS = { gundam: { speed: 600, range: 1600, cooldown: 0.35 }, dragon: { speed: 80, range: 800, cooldown: 0.9 } };
   const MAX_SHOTS = LOW_GFX ? 3 : 6, MAX_FX = LOW_GFX ? 7 : 12, FX_SCALE = LOW_GFX ? 0.5 : 1;   // fewer projectiles/particles on Low
   const ARM_PIVOT = [-6.4, 38.6, -0.9], MUZZLE = [0.01, -36.79, 1.38];             // gundam_rx78_18m*.glb: armR node (model units)
+  const RIFLE_GRIP = [-0.4, -14.0, 0.2];                                             // rifle node pivot in armR (tools/build_gundam_rifle.js)
   const BODY_T = [-0.23696897, 0, 0], BODY_S = 0.3889163389802798;                   // body node transform (rotation +90 deg about Y)
   const DRAGON_MOUTH = [12.23, 8.22, 0.22];                                         // dragon.glb flight frame (dragon units)
   const shots = [], effects = [], shotLog = [];   // shotLog: how recent shots ended (for tests)
@@ -1547,9 +1548,11 @@ void main() {
   // model-space (Cesium: X fwd, Y left, Z up, metres) -> world, through the character's current model matrix
   const toWorld = (m, p) => C.Matrix4.multiplyByPoint(m, new C.Cartesian3(p[0], p[1], p[2]), new C.Cartesian3());
   function gundamMuzzleWorld(armAngle) {
-    // arm node local (x left, y up, z fwd) -> rotate about x at the shoulder -> body node -> glTF -> Cesium model space
-    const c = Math.cos(armAngle), s = Math.sin(armAngle), m = MUZZLE;
-    const a = [m[0] + ARM_PIVOT[0], m[1] * c - m[2] * s + ARM_PIVOT[1], m[1] * s + m[2] * c + ARM_PIVOT[2]];
+    // rifle (turned at the fist) -> arm node local (x left, y up, z fwd), turned at the shoulder -> body node -> glTF -> Cesium
+    const R = fly.rifleRot || C.Matrix3.IDENTITY, A = fly.armRot || C.Matrix3.fromRotationX(armAngle);
+    const r = C.Matrix3.multiplyByVector(R, new C.Cartesian3(MUZZLE[0] - RIFLE_GRIP[0], MUZZLE[1] - RIFLE_GRIP[1], MUZZLE[2] - RIFLE_GRIP[2]), new C.Cartesian3());
+    const w = C.Matrix3.multiplyByVector(A, new C.Cartesian3(r.x + RIFLE_GRIP[0], r.y + RIFLE_GRIP[1], r.z + RIFLE_GRIP[2]), new C.Cartesian3());
+    const a = [w.x + ARM_PIVOT[0], w.y + ARM_PIVOT[1], w.z + ARM_PIVOT[2]];
     const g = [BODY_T[0] + BODY_S * a[2], BODY_T[1] + BODY_S * a[1], BODY_T[2] - BODY_S * a[0]];   // Ry(+90): (x,y,z) -> (z, y, -x)
     return toWorld(fly.model.modelMatrix, [g[0], -g[2], g[1]]);                                 // glTF Y-up -> Cesium Z-up
   }
@@ -1753,12 +1756,12 @@ void main() {
   }
   // Flight pose (radians; swing about the joint's x axis, negative = forward; abd about the forward axis, + = to its left):
   // a reference figure photo of the RX-78 flying toward the camera, torso leaning in. Rifle arm forward and a little out,
-  // the rifle raised ahead at shoulder height (this arm follows the body lean, so the rifle keeps its aim in the world);
+  // the rifle arm raised with the fist at head height (it follows the body lean), the rifle turned at the wrist to stay level;
   // shield arm down at its side, swung a little back with the armpit open 30 deg, shield face out (relative to the torso);
   // both legs trailing back and out, stretched, knees slightly bent and feet pointed (the right a touch less: no stiff mirror).
   const FLIGHT_POSE = {
-    head: 8 * DEG,
-    armR: { reach: 105 * DEG, max: 165 * DEG, abd: -18 * DEG }, armL: { back: 15 * DEG, abd: 30 * DEG, twist: 0 },
+    head: 15 * DEG, headMax: 80 * DEG,
+    armR: { reach: 135 * DEG, max: 175 * DEG, abd: -18 * DEG }, armL: { back: 15 * DEG, abd: 30 * DEG, twist: 0 },
     thighR: [18 * DEG, -9 * DEG], shinR: 22 * DEG, footR: 33 * DEG,
     thighL: [22 * DEG, 12 * DEG], shinL: 28 * DEG, footL: 38 * DEG
   };
@@ -1849,7 +1852,20 @@ void main() {
     // the flight pose also turns the arm a little out from the body (less while aiming, so the shot still leaves along the aim line)
     const abd = FLIGHT_POSE.armR.abd * (fly.flyPose || 0) * (t < 1.4 ? 0 : 1);
     fly.armAbd = (fly.armAbd || 0) + (abd - (fly.armAbd || 0)) * (1 - Math.exp(-dt * 10));
-    if (n) n.matrix = C.Matrix4.fromRotationTranslation(C.Matrix3.multiply(C.Matrix3.fromRotationZ(fly.armAbd), C.Matrix3.fromRotationX(ang), new C.Matrix3()), new C.Cartesian3(ARM_PIVOT[0], ARM_PIVOT[1], ARM_PIVOT[2]));
+    const armRot = C.Matrix3.multiply(C.Matrix3.fromRotationZ(fly.armAbd), C.Matrix3.fromRotationX(ang), new C.Matrix3());
+    if (n) n.matrix = C.Matrix4.fromRotationTranslation(armRot, new C.Cartesian3(ARM_PIVOT[0], ARM_PIVOT[1], ARM_PIVOT[2]));
+    // rifle (turned at the fist, tools/build_gundam_rifle.js): in the flight pose the barrel stays level along the flight
+    // direction whatever the arm angle and body lean; while aiming it lines up with the arm again, which points at the crosshair
+    const rn = fly.model && fly.model.ready && (fly.model.__rifle !== undefined ? fly.model.__rifle : (fly.model.__rifle = (() => { try { return fly.model.getNode("rifle") || null; } catch (e) { return null; } })()));
+    const lv = (fly.flyPose || 0) * (t < 1.4 ? 0 : 1);
+    fly.rifleLevel = (fly.rifleLevel || 0) + (lv - (fly.rifleLevel || 0)) * (1 - Math.exp(-dt * (lv ? 4 : 14)));
+    // wanted (body frame): pointing forward and level, i.e. swung forward 90 deg + the lean; local = arm^-1 * wanted
+    const want = C.Matrix3.multiply(C.Matrix3.transpose(armRot, new C.Matrix3()), C.Matrix3.fromRotationX(-(90 * DEG + Math.max(0, fly.lean))), new C.Matrix3());
+    const q = C.Quaternion.slerp(C.Quaternion.IDENTITY, C.Quaternion.fromRotationMatrix(want, new C.Quaternion()), fly.rifleLevel, new C.Quaternion());
+    fly.rifleRot = C.Matrix3.fromQuaternion(q, fly.rifleRot || new C.Matrix3());
+    if (rn) rn.matrix = C.Matrix4.fromRotationTranslation(fly.rifleRot, new C.Cartesian3(RIFLE_GRIP[0], RIFLE_GRIP[1], RIFLE_GRIP[2]));
+    else fly.rifleRot = C.Matrix3.clone(C.Matrix3.IDENTITY, fly.rifleRot);
+    fly.armRot = armRot;
   }
   function dragonFireAnim() { // [extra head pitch, extra wing] for the rear-back / lunge
     const t = fly.fireT === undefined ? 99 : fly.fireT;

@@ -82,14 +82,16 @@ Pick one on the start screen (**Character**), remembered between visits.
   `node tools/build_dragon_legs.js models/dragon.glb`, so the rider stays 1.75 m.
 
 Airborne, the Gundam holds a flight pose (first matched to a reference figure photo, then adjusted): the body leans
-forward clearly as it flies (about 15° hovering, 35° at slow cruise, 45° at full speed, 60° on boost; less when climbing),
-the neck takes back the whole lean so the head looks up along the flight path, the rifle arm is raised forward with the
-rifle at shoulder height (this arm follows the lean, so the rifle keeps its aim in the world), the shield arm hangs at its
-side swung a little back with the armpit open 30° and the shield face out, and both legs trail back and out, stretched
-with the knees slightly bent and the feet pointed (the right a touch less than the left). It is set on the model's
-existing joints at run time, so it is the same on all three detail levels and the model files and scale are unchanged; it
-blends out on the ground, so standing and walking look as before. Firing still raises the rifle arm to aim
-(`FLIGHT_POSE` in `js/app.js`).
+well forward as it flies (about 25° hovering, 45° at slow cruise, 55° at full speed, 75° on boost; less when climbing),
+the neck takes back the whole lean plus 15° (up to 80°) so the head looks up along the flight path, the rifle arm is
+raised with the fist at about head height (135° forward of the torso, following the lean), and the beam rifle is turned at
+the fist so its barrel stays level along the flight direction whatever the arm angle and lean. When you fire, the rifle
+lines up with the arm again and the arm swings to the crosshair as before; the beam leaves from the rifle's muzzle wherever
+it points. The shield arm hangs at its side swung a little back with the armpit open 30° and the shield face out, and both
+legs trail back and out, stretched with the knees slightly bent and the feet pointed (the right a touch less than the
+left). The pose is set on the model's joints at run time, so it is the same on all three detail levels and the scale is
+unchanged; it blends out on the ground, so standing and walking look as before (`FLIGHT_POSE` in `js/app.js`). The
+cockpit view follows at most 20° of the lean so the horizon stays in view.
 In flight both characters bank into turns, lean with speed and pitch back when climbing / forward when diving, and turn their
 heads into the turn (up to 30°). The dragon also beats its wings (slowly when cruising, faster and deeper on boost, folded
 when landed) and swings its tail. The chase, far and side cameras and the cockpit / rider's-eye view are sized per character. The chase, far, side and start-screen
@@ -230,7 +232,7 @@ turns the camera. The app searches the OSM buildings within 250 m of the configu
 plaza rather than a roof. Move it by editing `LOBBY` in `js/app.js`.
 
 ## Files
-* `models/gundam_rx78_18m.glb` flight model (static pose, rifle and shield in hand, faces +X). Its head is a separate node (`head`, pivoted at the neck) so in flight it looks into turns (up to 30°) and up/down with climbs and dives, while the body banks into turns and pitches back when climbing and forward when diving. The legs (hip, knee and ankle: `thighL/R`, `shinL/R`, `footL/R`) and the shield arm with the whole shield (`armL`) are separate nodes too, split by `tools/build_gundam_legs.js` (all three detail levels), for the walking animation.
+* `models/gundam_rx78_18m.glb` flight model (static pose, rifle and shield in hand, faces +X). Its head is a separate node (`head`, pivoted at the neck) so in flight it looks into turns (up to 30°) and up/down with climbs and dives, while the body banks into turns and pitches back when climbing and forward when diving. The legs (hip, knee and ankle: `thighL/R`, `shinL/R`, `footL/R`) and the shield arm with the whole shield (`armL`) are separate nodes too, split by `tools/build_gundam_legs.js` (all three detail levels), for the walking animation. The beam rifle with the right fist is a separate node too (`rifle`, child of `armR`, pivoted at the fist; `tools/build_gundam_rifle.js`), so the flight pose can keep it level.
 * `models/gundam_rx78_pullup_18m.glb` skinned model with the `PullUp` loop (faces +Z): 3 reps in 14.7 s that slow down with fatigue, a pause with the chin over the bar, a slower controlled descent, the upper body leaning back behind the bar as it rises (head over the bar from behind, legs swinging forward to balance), and legs that lag and swing slightly. The fists stay closed around a round bar in one overhand grip the whole time (the finger curl is baked into the mesh, so no extra joints are needed on phones), and the arms are solved every frame so the forearms stay near vertical under the bar while the elbows travel down and out.
 * `models/*_med.glb`, `models/*_low.glb` Medium and Low detail versions of both Gundam models
 * `models/pilot_*.glb` five pilot poses
