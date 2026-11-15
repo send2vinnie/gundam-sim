@@ -72,9 +72,10 @@
   const DRAGON_WALK_RAISE = 25 * DEG;   // on foot the body is raised from the flight attitude to stand (30 deg forward lean)
   const DRAGON_WALK_HEAD_TILT = 12 * DEG;
   // resting (P on the ground): the body comes down from standing to level and lower, legs crouched under it (thigh
-  // forward, knee bent, foot flat), wings spread, raised and swept forward around the rider as a shield (held still), head
+  // forward, knee bent, foot flat), wings spread, raised, swept and tipped forward over the rider so they arch around and in
+  // front of it as a shield (held still; the tips almost meet above the head, which stays clear to fire), head
   // lowered a little
-  const DRAGON_REST = { hip: -60 * DEG, knee: 120 * DEG, ankle: -60 * DEG, wing: 30 * DEG, sweep: 50 * DEG, head: -12 * DEG, lean: 4 * DEG };   // at most this much head tilt to compensate, so the horns stay close to the rider's hands
+  const DRAGON_REST = { hip: -60 * DEG, knee: 120 * DEG, ankle: -60 * DEG, wing: 50 * DEG, sweep: 65 * DEG, wingTilt: -60 * DEG, head: -12 * DEG, lean: 4 * DEG };   // at most this much head tilt to compensate, so the horns stay close to the rider's hands
   const CHARACTERS = {
     gundam: { name: "Gundam RX-78-02 (18 m)", leanMax: 55, phys: { mass: 43.4, thrust: 7, climb: 5, rollRate: 45 * DEG, lift: "thrusters", stall: 0 }, center: MS_CENTER, eye: 16.6, eyeFwd: 1.5, height: MS_HEIGHT, unit: "MS height", cams: [55, 160, 45],
       // walking (m/s, deg/s, m): run = Shift; step = highest ledge it steps onto (higher blocks), drop = edge it walks off,
@@ -796,9 +797,15 @@ void main() {
     }
     // left wing is on native +x: a positive turn about the forward axis lifts it; the right wing mirrors
     // (sweep, resting: both wings turned forward about the flight-up axis, so they curl around the rider)
-    const sw = walk && walk.sweep || 0;
-    if (N.wingL) setJoint(N.wingL, J.wingL.p, sw ? C.Quaternion.multiply(axisQ(D_UP, sw, scratchQ2), axisQ(D_FWD, wing, scratchQ), scratchQ) : axisQ(D_FWD, wing, scratchQ));
-    if (N.wingR) setJoint(N.wingR, J.wingR.p, sw ? C.Quaternion.multiply(axisQ(D_UP, -sw, scratchQ2), axisQ(D_FWD, -wing, scratchQ), scratchQ) : axisQ(D_FWD, -wing, scratchQ));
+    // (and tilt: both wings tipped forward about the across axis, over and in front of the rider)
+    const sw = walk && walk.sweep || 0, wt = walk && walk.wingTilt || 0;
+    for (const [nd, J0, sgn] of [[N.wingL, J.wingL, 1], [N.wingR, J.wingR, -1]]) {
+      if (!nd) continue;
+      let q = axisQ(D_FWD, sgn * wing, scratchQ);
+      if (sw) q = C.Quaternion.multiply(axisQ(D_UP, sgn * sw, scratchQ2), q, new C.Quaternion());
+      if (wt) q = C.Quaternion.multiply(axisQ([1, 0, 0], -wt, scratchQ2), q, new C.Quaternion());
+      setJoint(nd, J0.p, q);
+    }
     if (N.tail) { C.Quaternion.multiply(axisQ(D_UP, tailYaw, scratchQ), axisQ([1, 0, 0], J.tail.rest + tilt, scratchQ2), scratchQ); setJoint(N.tail, J.tail.p, scratchQ); }
   }
 
@@ -1471,7 +1478,7 @@ void main() {
         const rk = restEase(), hy = fly.headYaw * 0.7 * keep + da.yaw, hp = fly.headPitch * 0.7 * keep + fa[0] + nod + da.pitch + DRAGON_REST.head * rk * keep;
         fly.dHead = { yaw: hy, pitch: hp, tilt: fly.headTilt }; fly.dHeadFa = fa[0];
         poseDragon(fly.model, hy, hp, (fly.wingAmp * Math.sin(fly.wingPhase) + fold + fa[1]) * (1 - rk) + DRAGON_REST.wing * rk, -fly.headYaw * 0.6 + sway,
-          { tilt: fly.headTilt, legs: fly.dragonLegs || [0, 0, 0, 0, 0, 0], sweep: DRAGON_REST.sweep * rk });
+          { tilt: fly.headTilt, legs: fly.dragonLegs || [0, 0, 0, 0, 0, 0], sweep: DRAGON_REST.sweep * rk, wingTilt: DRAGON_REST.wingTilt * rk });
       } else {
         // while aiming, the head looks along the line of fire
         const aiming = fly.fireT !== undefined && fly.fireT < 1.4;
@@ -2055,12 +2062,12 @@ void main() {
     thighR: [18 * DEG, -9 * DEG], shinR: 22 * DEG, footR: 33 * DEG,
     thighL: [22 * DEG, 12 * DEG], shinL: 28 * DEG, footL: 38 * DEG
   };
-  // Kneeling stance (on foot, standing still): down on the left knee with the shin flat behind it and the instep on the
-  // ground; the right knee raised, its foot planted flat ahead; the shield arm bent in a V so the shield guards the body;
+  // Kneeling stance (on foot, standing still): down on the left knee, the shin tipped up a little behind it and the toes resting on
+  // the ground (ankle near neutral); the right knee raised, its foot planted flat ahead; the shield arm bent in a V so the shield guards the body;
   // the rifle arm raised level and in a little, the rifle level; the head leaning right toward the rifle's sight.
   // Leg swing [hip, knee, ankle] (negative hip = forward); arm angles as in FLIGHT_POSE; head [yaw right, pitch up, roll right].
   const KNEEL_POSE = {
-    legL: [-15 * DEG, 105 * DEG, 78 * DEG], legR: [-148 * DEG, 130 * DEG, 18 * DEG], abdL: 4 * DEG, abdR: -10 * DEG,
+    legL: [-15 * DEG, 122 * DEG, -5 * DEG], legR: [-148 * DEG, 130 * DEG, 18 * DEG], abdL: 4 * DEG, abdR: -10 * DEG,
     armL: { swing: -25 * DEG, abd: -15 * DEG, twist: -65 * DEG, elbow: -115 * DEG, hang: 0, twistF: 0 },
     armR: { angle: -88 * DEG, abd: 12 * DEG, elbow: -12 * DEG },
     head: [8 * DEG, -8 * DEG, 18 * DEG], knee: 3.4   // knee: knee-cap depth below the knee pivot with the shin flat (units)

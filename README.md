@@ -201,12 +201,12 @@ lurch forward, no control), then it walks.
   step, and lands with the toes slightly up before flattening as it takes the weight; the dragon does the same, more
   subtly.
 * **Kneel / rest (P):** on the ground, **P** (gamepad **B**, the touch **KNEEL** / **REST** button shown on foot) toggles a
-  stance; P again, any move, turn or jump gets up first. The **Gundam** kneels on its left knee (shin flat, instep down),
+  stance; P again, any move, turn or jump gets up first. The **Gundam** kneels on its left knee (toes resting on the ground),
   the right knee raised with the foot planted, the shield arm bent in a V so the shield guards the body, the rifle arm
   raised level and the head leaning right toward the sight; the body drops so the knee rests on the ground and the
   cockpit eye drops with it. Aiming and firing work as usual (`KNEEL_POSE`). The **dragon** crouches low (body level,
-  legs folded under it, head a little down) with its wings spread, raised and swept forward around the rider as a
-  shield, held still; fireballs still leave the mouth with the usual aim rules (`DRAGON_REST`).
+  legs folded under it, head a little down) with its wings spread and brought forward over the rider, arching around
+  and in front of it as a shield with the tips almost meeting above the head (held still); fireballs still leave the mouth with the usual aim rules (`DRAGON_REST`).
 * **Camera sway:** the camera rolls side to side with each step and dips a little at each footfall: in the cockpit
   view about 2.5° walking and 4.5° running for the heavy Gundam (with a deeper dip), 1.6° / 2.8° for the lighter dragon;
   in the outside views only about a third of that. In the cockpit view the view also nods down at each footfall and back
