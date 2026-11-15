@@ -50,6 +50,24 @@ function fix(file) {
       n++;
     });
     console.log(file + ": front arms and hands re-weighted to the body: " + n + " vertices");
+    // the claws at the top front corner of each wing (the wing's "thumb", above z 17, light blue tip) were weighted mostly to
+    // the body, so they stayed put while the wing beat: they go wholly onto their wing joint, in every dragon primitive
+    const wingJ = { L: jointNamesOf(j).indexOf("wingL"), R: jointNamesOf(j).indexOf("wingR") };
+    let m = 0;
+    for (const p of skinned) {
+      const PX = A(p.attributes.POSITION), JX = A(p.attributes.JOINTS_0), WX = A(p.attributes.WEIGHTS_0);
+      for (let i = 0; i < PX.a.count; i++) {
+        const v = toNative([get(PX, i, 0), get(PX, i, 1), get(PX, i, 2)]), ax = Math.abs(v[0]);
+        if (ax < 3.5 || ax > 8 || v[2] < 16.8) continue;
+        const wj = v[0] > 0 ? wingJ.L : wingJ.R, t = Math.min(1, (v[2] - 16.8) / 0.4);
+        const jt = [0, 1, 2, 3].map((k) => get(JX, i, k)), w = [0, 1, 2, 3].map((k) => get(WX, i, k));
+        let slot = jt.findIndex((x, k) => x === wj && w[k] > 0); if (slot < 0) { slot = w.indexOf(Math.min(...w)); jt[slot] = wj; w[slot] = 0; }
+        const nw = w.map((x, k) => (k === slot ? x + (1 - x) * t : x * (1 - t)));
+        for (let k = 0; k < 4; k++) { set(JX, i, k, jt[k]); set(WX, i, k, nw[k]); }
+        m++;
+      }
+    }
+    console.log(file + ": wing-top claws re-weighted to their wing: " + m + " vertices");
   }
   const near = (v) => { let bi = -1, bd = Infinity; for (let i = 0; i < BP.length; i++) { const d = (BP[i][0] - v[0]) ** 2 + (BP[i][1] - v[1]) ** 2 + (BP[i][2] - v[2]) ** 2; if (d < bd) { bd = d; bi = i; } } return [bi, Math.sqrt(bd)]; };
   const jointNames = jointNamesOf(j);
