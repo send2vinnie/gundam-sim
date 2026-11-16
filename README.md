@@ -26,6 +26,13 @@ work offline afterwards:
   sets were checked too: for Taiwan they hold no more than OSM, and Taiwan's official 3D models need a citizen-certificate
   login to download.
 
+**Aerial photos on the Tokyo ground.** While online, the ground under the Tokyo map shows GSI's seamless aerial photos
+(地理院タイル, 全国最新写真, `cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg`), so roads, rivers, parks and the
+bay show between the buildings. They cover the Tokyo map plus a 0.2° margin, up to zoom 18 (about 0.5 m a pixel; zoom 16
+on Low). They are streamed from GSI and never stored by the game or its service worker; offline, or where a tile fails,
+the plain grey grid shows instead, and the Taipei start screen always uses the grid. Turn them off in Settings
+(*Aerial photos*). Source credit: 出典：国土地理院 地理院タイル, shown on screen and in Credits.
+
 **High graphics: PLATEAU's original tiles.** On High, the Tokyo buildings are streamed from PLATEAU's own public 3D Tiles
 hosting instead of the bundled copies: the same tile tree, levels of detail and feature ids, but with the original 4096 px
 texture atlases (the bundled copies use 1024 px). The game asks PLATEAU VIEW's official data catalog
