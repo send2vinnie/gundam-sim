@@ -49,7 +49,13 @@ async function pool(items, n, fn) {
     if (done % 200 === 0) process.stdout.write(`  ${done}/${items.length} (${((Date.now() - t0) / 1000).toFixed(0)} s)\n`); } }));
 }
 function contentUris(tile, out = []) { if (tile.content && tile.content.uri) out.push(tile.content.uri); (tile.children || []).forEach((c) => contentUris(c, out)); return out; }
-function leafUris(tile, out = []) { if (!(tile.children || []).length) { if (tile.content && tile.content.uri) out.push(tile.content.uri); } else tile.children.forEach((c) => leafUris(c, out)); return out; }
+// most detailed tiles, each with its accumulated tile transform (column-major 4x4, 3D Tiles 1.1 may use them)
+function leafTiles(tile, parentT = null, out = []) {
+  const T = tile.transform ? (parentT ? mul(parentT, tile.transform) : tile.transform) : parentT;
+  if (!(tile.children || []).length) { if (tile.content && tile.content.uri) out.push({ uri: tile.content.uri, T }); }
+  else tile.children.forEach((c) => leafTiles(c, T, out));
+  return out;
+}
 
 async function downloadWard(name) {
   const dir = path.join(CACHE, name);
@@ -79,8 +85,34 @@ async function downloadWard(name) {
 }
 
 // ---------------------------------------------------------------- b3dm ------------------------------------------------------
+// Some wards (Taito, 2025) come as 3D Tiles 1.1: plain .glb tiles whose building ids are EXT_mesh_features feature ids
+// (_FEATURE_ID_n attributes, with the attributes in an EXT_structural_metadata property table). They are converted to the
+// same b3dm form as the other wards (ids as _BATCHID, BATCH_LENGTH in the feature table, no attribute table), so the game
+// treats every ward alike. The file keeps its .glb name: Cesium tells the formats apart by their first bytes.
+function glbAsB3dm(buf) {
+  const jsonLen = buf.readUInt32LE(12), json = JSON.parse(buf.toString("utf8", 20, 20 + jsonLen));
+  const binLen = buf.length > 20 + jsonLen + 8 ? buf.readUInt32LE(20 + jsonLen) : 0, bin = buf.subarray(20 + jsonLen + 8, 20 + jsonLen + 8 + binLen);
+  let count = 0;
+  for (const m of json.meshes || []) for (const pr of m.primitives) {
+    const fx = pr.extensions && pr.extensions.EXT_mesh_features; if (!fx) continue;
+    const fid = (fx.featureIds || [])[0];
+    if (!fid || fid.attribute === undefined) throw new Error("EXT_mesh_features without a feature id attribute is not supported");
+    const name = "_FEATURE_ID_" + fid.attribute;
+    pr.attributes._BATCHID = pr.attributes[name]; delete pr.attributes[name];
+    const dr = pr.extensions.KHR_draco_mesh_compression;
+    if (dr && dr.attributes[name] !== undefined) { dr.attributes._BATCHID = dr.attributes[name]; delete dr.attributes[name]; }
+    count = Math.max(count, fid.featureCount || 0);
+    delete pr.extensions.EXT_mesh_features;
+  }
+  if (json.extensions) delete json.extensions.EXT_structural_metadata;
+  for (const k of ["extensionsUsed", "extensionsRequired"]) if (json[k]) { json[k] = json[k].filter((x) => x !== "EXT_mesh_features" && x !== "EXT_structural_metadata"); if (!json[k].length) delete json[k]; }
+  const ftJson = { BATCH_LENGTH: count }, ftBytes = Buffer.from(JSON.stringify(ftJson));
+  return { featureTable: ftBytes, ftj: ftBytes.length, ftb: 0, ftJson, json, bin, fromGlb: true };
+}
 function parseB3dm(buf) {
-  if (buf.toString("ascii", 0, 4) !== "b3dm") throw new Error("not b3dm");
+  const magic = buf.toString("ascii", 0, 4);
+  if (magic === "glTF") return glbAsB3dm(buf);
+  if (magic !== "b3dm") throw new Error("not b3dm or glb");
   const ftj = buf.readUInt32LE(12), ftb = buf.readUInt32LE(16), btj = buf.readUInt32LE(20), btb = buf.readUInt32LE(24);
   const featureTable = buf.subarray(28, 28 + ftj + ftb), ftJson = JSON.parse(buf.toString("utf8", 28, 28 + ftj).trim() || "{}");
   const g = 28 + ftj + ftb + btj + btb;
@@ -100,6 +132,8 @@ function writeB3dm(t, json, parts) {
   const js = Buffer.from(JSON.stringify(json)), jsPad = pad(js.length);
   const glbLen = 12 + 8 + js.length + jsPad + 8 + binLen;
   // feature table kept (BATCH_LENGTH, RTC_CENTER); batch table (building attributes) dropped
+  if (t.fromGlb) { const n = Math.max(t.ftJson.BATCH_LENGTH, (json.__maxBatchId ?? -1) + 1); const b = Buffer.from(JSON.stringify({ BATCH_LENGTH: n })); t.featureTable = b; t.ftj = b.length; t.ftb = 0; }
+  delete json.__maxBatchId;
   const ft = t.featureTable;
   const ftJson = Buffer.concat([ft.subarray(0, t.ftj), Buffer.alloc(pad(28 + t.ftj, 8), 0x20)]);
   const ftBin = Buffer.concat([ft.subarray(t.ftj), Buffer.alloc(pad(t.ftb, 8), 0)]);
@@ -138,6 +172,7 @@ function reencodeDraco(json, bytes, pr, ext) {
     else { const T = { 5121: [Uint8Array, "AddUInt8Attribute"], 5123: [Uint16Array, "AddUInt16Attribute"], 5125: [Uint32Array, "AddUInt32Attribute"] }[ct];
       if (!T) throw new Error("unsupported attribute type " + ct + " for " + k);
       ids[k] = mb[T[1]](em, type, np, nc, T[0].from(v, (x) => Math.round(x))); }
+    if (k === "_BATCHID") { let mx = json.__maxBatchId ?? -1; for (let i = 0; i < v.length; i++) if (v[i] > mx) mx = v[i]; json.__maxBatchId = mx; }
   }
   draco.destroy(mesh); draco.destroy(db); draco.destroy(d);
   enc.SetSpeedOptions(5, 5);
@@ -209,7 +244,7 @@ function accessorFloats(json, bin, idx) {   // plain (non-Draco) accessor
   const out = new Float32Array(a.count * comps); for (let i = 0; i < a.count; i++) for (let c = 0; c < comps; c++) out[i * comps + c] = view[i * stride + c]; return out;
 }
 // building base points of one tile: [{lon, lat, h}] (radians, ellipsoid metres), one per footprint vertex
-function tileBasePoints(buf) {
+function tileBasePoints(buf, T) {
   const t = parseB3dm(buf), json = t.json;
   const rtc = (json.extensions && json.extensions.CESIUM_RTC && json.extensions.CESIUM_RTC.center) || t.ftJson.RTC_CENTER || [0, 0, 0];
   const Y_UP_TO_Z_UP = [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1];
@@ -224,7 +259,9 @@ function tileBasePoints(buf) {
       const W = mul(Y_UP_TO_Z_UP, M), nv = pos.length / 3, geo = new Array(nv), minH = new Map();
       for (let i = 0; i < nv; i++) {
         const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
-        const g = ecefToGeo(W[0] * x + W[4] * y + W[8] * z + W[12] + rtc[0], W[1] * x + W[5] * y + W[9] * z + W[13] + rtc[1], W[2] * x + W[6] * y + W[10] * z + W[14] + rtc[2]);
+        let X = W[0] * x + W[4] * y + W[8] * z + W[12] + rtc[0], Y = W[1] * x + W[5] * y + W[9] * z + W[13] + rtc[1], Z = W[2] * x + W[6] * y + W[10] * z + W[14] + rtc[2];
+        if (T) { const x2 = T[0] * X + T[4] * Y + T[8] * Z + T[12], y2 = T[1] * X + T[5] * Y + T[9] * Z + T[13]; Z = T[2] * X + T[6] * Y + T[10] * Z + T[14]; X = x2; Y = y2; }
+        const g = ecefToGeo(X, Y, Z);
         geo[i] = g; const b = bid ? bid[i] : 0; if (!(minH.get(b) <= g[2])) minH.set(b, g[2]);
       }
       for (let i = 0; i < nv; i++) { const b = bid ? bid[i] : 0, m = minH.get(b); if (geo[i][2] < m + 0.5) out.push({ lon: geo[i][0], lat: geo[i][1], h: m }); }
@@ -245,10 +282,11 @@ function buildGround(wards) {
   const size = Math.ceil(Math.max((e - w) * mLon, (n - s) * mLat) / CELL_M) + 1;
   const low = new Float64Array(size * size).fill(Infinity);   // lowest building base in each cell
   for (const wd of wards) {
-    const leaves = leafUris(wd.ts.root);
+    const leaves = leafTiles(wd.ts.root);
     console.log(`  ground: ${wd.name}, ${leaves.length} most detailed tiles`);
-    for (const u of leaves) {
-      let pts; try { pts = tileBasePoints(fs.readFileSync(path.join(wd.dir, u))); } catch (er) { console.warn("  ground: skipped " + u + ": " + er.message); continue; }
+    let skipped = 0;
+    for (const { uri: u, T } of leaves) {
+      let pts; try { pts = tileBasePoints(fs.readFileSync(path.join(wd.dir, u)), T); } catch (er) { if (++skipped <= 5) console.warn("  ground: skipped " + u + ": " + er.message); continue; }
       for (const p of pts) {
         const x = Math.round((p.lon - w) / (e - w) * (size - 1)), y = Math.round((p.lat - s) / (n - s) * (size - 1));
         if (x < 0 || y < 0 || x >= size || y >= size) continue;
