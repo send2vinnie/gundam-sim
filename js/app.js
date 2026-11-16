@@ -364,9 +364,12 @@ void main() {
   // ---- local (offline) city -------------------------------------------------
   // PLATEAU tiles use ellipsoidal heights. The ground under them is a terrain built from each building's base height
   // (cities/tokyo/ground.json + .bin grids), so streets, roofs and landing all line up. Elsewhere the ground is the ellipsoid.
-  // whole wards (tools/build_plateau_wards.js), so the city is one connected map; Chuo and Taito fill the gap between
-  // Tokyo Station and Skytree
-  const LOCAL_WARDS = ["shinjuku", "shibuya", "minato", "chiyoda", "chuo", "taito", "sumida", "koto"];
+  // all 23 special wards, whole (tools/build_plateau_wards.js), so the city is one connected map. Each ward streams in only
+  // when the camera comes near it.
+  const PLATEAU_CODES = { chiyoda: 13101, chuo: 13102, minato: 13103, shinjuku: 13104, bunkyo: 13105, taito: 13106, sumida: 13107,
+    koto: 13108, shinagawa: 13109, meguro: 13110, ota: 13111, setagaya: 13112, shibuya: 13113, nakano: 13114, suginami: 13115,
+    toshima: 13116, kita: 13117, arakawa: 13118, itabashi: 13119, nerima: 13120, adachi: 13121, katsushika: 13122, edogawa: 13123 };
+  const LOCAL_WARDS = Object.keys(PLATEAU_CODES);
   const LOCAL_CREDITS = {
     plateau: "3D都市モデル Project PLATEAU（国土交通省）を加工して作成",
     plateauOriginal: "出典：国土交通省 PLATEAU 3D都市モデル（東京都 2025 LOD2）",
@@ -460,7 +463,11 @@ void main() {
       let j; try { const r = await fetch("cities/tokyo/" + w + "/tileset.json"); if (!r.ok) throw new Error(r.status); j = await r.json(); }
       catch (e) { console.warn("no local map for " + w, e); return; }   // a ward not built (yet) is simply left out
       const [west, south, east, north] = j.root.boundingVolume.region;
-      wardSlots.push({ name: w, west, south, east, north, ts: null, loading: null, want: false, json: HIGH_GFX ? j : null, original: false, failed: 0 });
+      // the boxes of the ward's most detailed tiles (about 1 km each) trace its real shape; the ward's own rectangle is far
+      // bigger than the ward and overlaps its neighbours'
+      const boxes = [];
+      (function leaves(t) { if ((t.children || []).length) t.children.forEach(leaves); else if (t.content && t.boundingVolume && t.boundingVolume.region) boxes.push(...t.boundingVolume.region.slice(0, 4)); })(j.root);
+      wardSlots.push({ name: w, west, south, east, north, boxes: boxes.length ? new Float64Array(boxes) : null, ts: null, loading: null, want: false, json: HIGH_GFX ? j : null, original: false, failed: 0 });
     }));
     for (const txt of [HIGH_GFX ? LOCAL_CREDITS.plateauOriginal : LOCAL_CREDITS.plateau, LOCAL_CREDITS.osm]) viewer.creditDisplay.addStaticCredit(new C.Credit(txt, true));
     await loadNangang(ground);
@@ -469,17 +476,23 @@ void main() {
   const WARD_LOAD_M = (LOW_GFX ? RENDER_DISTANCE : 6000) + 1000;   // load an area when the camera is this close to its edge
   const WARD_DROP_M = WARD_LOAD_M + 1500;                             // drop it beyond this (no flicker at the boundary)
   const wardSlots = [];
-  function wardDistance(s, lon, lat) {   // metres from a point (radians) to an area's rectangle, 0 inside
-    const dx = lon < s.west ? s.west - lon : lon > s.east ? lon - s.east : 0;
-    const dy = lat < s.south ? s.south - lat : lat > s.north ? lat - s.north : 0;
+  function rectDistance(w, so, e, n, lon, lat) {   // metres from a point (radians) to a rectangle, 0 inside
+    const dx = lon < w ? w - lon : lon > e ? lon - e : 0;
+    const dy = lat < so ? so - lat : lat > n ? lat - n : 0;
     return Math.hypot(dx * R_EARTH * Math.cos(lat), dy * R_EARTH);
+  }
+  function wardDistance(s, lon, lat) {   // metres from a point (radians) to the nearest of an area's tiles, 0 inside one
+    const d = rectDistance(s.west, s.south, s.east, s.north, lon, lat);
+    if (!s.boxes || d > WARD_DROP_M) return d;   // far from the whole ward: no need to look at its tiles
+    let m = Infinity; const b = s.boxes;
+    for (let i = 0; i < b.length && m > 0; i += 4) m = Math.min(m, rectDistance(b[i], b[i + 1], b[i + 2], b[i + 3], lon, lat));
+    return m;
   }
   // High: PLATEAU's original full-detail tiles, streamed from PLATEAU's public 3D Tiles hosting (the PLATEAU VIEW data
   // catalog, CORS open). The bundled copies are the same tile tree (whole wards, geometry re-encoded, textures reduced),
   // so the bundled tileset.json is reused with each tile pointing at its original: the same areas, levels of
   // detail and feature ids, only sharper textures. The official catalog API gives the current location of each ward's
   // tiles. If it can't be reached, or tiles keep failing, that area falls back to the bundled copy.
-  const PLATEAU_CODES = { shinjuku: 13104, shibuya: 13113, minato: 13103, chiyoda: 13101, chuo: 13102, taito: 13106, sumida: 13107, koto: 13108 };
   async function originalWardUrl(s) {
     const r = await fetch("https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/" + PLATEAU_CODES[s.name] + "-bldg-lod2-texture-2025/tileset.json");
     if (!r.ok) throw new Error("PLATEAU catalog " + r.status);

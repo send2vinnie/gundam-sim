@@ -4,11 +4,11 @@
  "areas": [
   {
    "name": "tokyo",
-   "west": 139.661401,
-   "south": 35.578695,
-   "east": 139.84927,
-   "north": 35.742442,
-   "size": 912,
+   "west": 139.563032,
+   "south": 35.523416,
+   "east": 139.917546,
+   "north": 35.817496,
+   "size": 1637,
    "file": "ground/tokyo.bin"
   }
  ]

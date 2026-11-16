@@ -8,9 +8,8 @@ is needed. It runs in Chrome or Edge on **Windows** and Chrome on **Android**, a
 The game uses only its own local city maps, stored with the game and cached on the device as you visit areas, so they also
 work offline afterwards:
 * Tokyo: the Japanese government's open 3D city model [Project PLATEAU](https://www.mlit.go.jp/plateau/) (MLIT, 2025, LOD2
-  buildings with photo textures where PLATEAU has them). One connected map of eight whole wards: Shinjuku, Shibuya,
-  Minato, Chiyoda, Chuo, Taito, Sumida and Koto (`cities/tokyo/<ward>/tileset.json`), so you can fly between all six
-  starting points (Nishi-Shinjuku, Shibuya, Tokyo Tower, Tokyo Station / Marunouchi, Skytree, Odaiba) over real city.
+  buildings with photo textures where PLATEAU has them). One connected map of all 23 special wards of Tokyo, whole
+  (`cities/tokyo/<ward>/tileset.json`), so you can fly between all six starting points (Nishi-Shinjuku, Shibuya, Tokyo Tower, Tokyo Station / Marunouchi, Skytree, Odaiba) over real city.
   The map is built by `tools/build_plateau_wards.js` (run on a computer that can reach PLATEAU, see *Rebuilding the map*):
   * **Geometry re-encoded.** PLATEAU's tiles store every triangle with its own three full-precision corners. The tool
     re-encodes them with shared corners and quantized values (positions to about 1 cm), which makes the geometry about
@@ -48,8 +47,9 @@ reduces the textures.
 **Rebuilding the map.** On a computer that can reach PLATEAU (about 5 GB of free disk for the download cache):
 ```
 cd tools && npm install && cd ..
-node --use-system-ca tools/build_plateau_wards.js            # all eight wards, texture size chosen to fit 950 MB
+node --use-system-ca tools/build_plateau_wards.js            # all 23 wards, texture size chosen to fit 950 MB
 node --use-system-ca tools/build_plateau_wards.js --tex 512  # or a fixed texture size
+node --use-system-ca tools/build_plateau_wards.js --measure  # sizes only: exact originals, sample-based estimate per texture size
 ```
 It downloads each ward once into `../plateau-cache` (reused on later runs), prints the estimated site size for each
 texture size, writes `cities/tokyo/`, and removes map folders that are no longer used. After a rebuild, bump
@@ -200,7 +200,7 @@ On every quality setting:
   query; shader changes show up here, not in the CPU times; "n/a" where the browser doesn't offer the timer), the time per frame (ms) of each part of the update
   (area streaming, flight: ground and walls / physics / pose / HUD, weapons and effects, camera, start screen), Cesium's
   render, the frame time, the FPS, the time in GPU picks and the share of frames that pick.
-* **Tokyo wards stream by distance.** Each of the 8 Tokyo wards is opened when the camera comes within the draw distance
+* **Tokyo wards stream by distance.** Each of the 23 Tokyo wards is opened when the camera comes within the draw distance
   + 1 km of it (Low 4 km, others 7 km) and dropped, freeing its memory, 1.5 km beyond that. The Taipei start screen loads no
   Tokyo tiles at all.
 * **Automatic resolution** (Settings, on by default). Every 2 s the game checks the frame rate: below 85 % of the target
