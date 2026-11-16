@@ -463,7 +463,11 @@ void main() {
       let j; try { const r = await fetch("cities/tokyo/" + w + "/tileset.json"); if (!r.ok) throw new Error(r.status); j = await r.json(); }
       catch (e) { console.warn("no local map for " + w, e); return; }   // a ward not built (yet) is simply left out
       const [west, south, east, north] = j.root.boundingVolume.region;
-      wardSlots.push({ name: w, west, south, east, north, ts: null, loading: null, want: false, json: HIGH_GFX ? j : null, original: false, failed: 0 });
+      // the boxes of the ward's most detailed tiles (about 1 km each) trace its real shape; the ward's own rectangle is far
+      // bigger than the ward and overlaps its neighbours'
+      const boxes = [];
+      (function leaves(t) { if ((t.children || []).length) t.children.forEach(leaves); else if (t.content && t.boundingVolume && t.boundingVolume.region) boxes.push(...t.boundingVolume.region.slice(0, 4)); })(j.root);
+      wardSlots.push({ name: w, west, south, east, north, boxes: boxes.length ? new Float64Array(boxes) : null, ts: null, loading: null, want: false, json: HIGH_GFX ? j : null, original: false, failed: 0 });
     }));
     for (const txt of [HIGH_GFX ? LOCAL_CREDITS.plateauOriginal : LOCAL_CREDITS.plateau, LOCAL_CREDITS.osm]) viewer.creditDisplay.addStaticCredit(new C.Credit(txt, true));
     await loadNangang(ground);
@@ -472,10 +476,17 @@ void main() {
   const WARD_LOAD_M = (LOW_GFX ? RENDER_DISTANCE : 6000) + 1000;   // load an area when the camera is this close to its edge
   const WARD_DROP_M = WARD_LOAD_M + 1500;                             // drop it beyond this (no flicker at the boundary)
   const wardSlots = [];
-  function wardDistance(s, lon, lat) {   // metres from a point (radians) to an area's rectangle, 0 inside
-    const dx = lon < s.west ? s.west - lon : lon > s.east ? lon - s.east : 0;
-    const dy = lat < s.south ? s.south - lat : lat > s.north ? lat - s.north : 0;
+  function rectDistance(w, so, e, n, lon, lat) {   // metres from a point (radians) to a rectangle, 0 inside
+    const dx = lon < w ? w - lon : lon > e ? lon - e : 0;
+    const dy = lat < so ? so - lat : lat > n ? lat - n : 0;
     return Math.hypot(dx * R_EARTH * Math.cos(lat), dy * R_EARTH);
+  }
+  function wardDistance(s, lon, lat) {   // metres from a point (radians) to the nearest of an area's tiles, 0 inside one
+    const d = rectDistance(s.west, s.south, s.east, s.north, lon, lat);
+    if (!s.boxes || d > WARD_DROP_M) return d;   // far from the whole ward: no need to look at its tiles
+    let m = Infinity; const b = s.boxes;
+    for (let i = 0; i < b.length && m > 0; i += 4) m = Math.min(m, rectDistance(b[i], b[i + 1], b[i + 2], b[i + 3], lon, lat));
+    return m;
   }
   // High: PLATEAU's original full-detail tiles, streamed from PLATEAU's public 3D Tiles hosting (the PLATEAU VIEW data
   // catalog, CORS open). The bundled copies are the same tile tree (whole wards, geometry re-encoded, textures reduced),
