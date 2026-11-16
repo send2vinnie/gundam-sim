@@ -524,7 +524,11 @@ void main() {
         imageBasedLighting: skyLight(),
         // High: the city receives shadows (the Gundam's and the dragon's fall on roofs and walls) but doesn't cast them, so it
         // isn't drawn a second time into the shadow map every frame. Buildings no longer shadow each other or the street.
-        shadows: QUALITY.shadows ? C.ShadowMode.RECEIVE_ONLY : C.ShadowMode.DISABLED
+        shadows: QUALITY.shadows ? C.ShadowMode.RECEIVE_ONLY : C.ShadowMode.DISABLED,
+        // PLATEAU stores many walls wound inward (their normals point out, but the triangles face in: about a quarter of the
+        // faces in central wards). With back-face culling those walls vanish from outside and the buildings look hollow,
+        // see-through shells. Drawing both sides fixes it; the extra back faces of closed buildings are hidden by depth.
+        backFaceCulling: false
       }); }
     catch (e) { if (!s.original) throw e; console.warn("PLATEAU original tileset failed for " + s.name + ", using the bundled copy", e); s.failed = 3; return openWard(s); }
     finally { if (blob) URL.revokeObjectURL(blob); }
