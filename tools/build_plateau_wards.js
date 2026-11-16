@@ -21,11 +21,11 @@
 "use strict";
 const fs = require("fs"), path = require("path");
 
-const WARDS = { shinjuku: 13104, shibuya: 13113, minato: 13103, chiyoda: 13101, sumida: 13107, koto: 13108, chuo: 13102, taito: 13106 };
 // all 23 special wards of Tokyo, for --measure
 const ALL_WARDS = { chiyoda: 13101, chuo: 13102, minato: 13103, shinjuku: 13104, bunkyo: 13105, taito: 13106, sumida: 13107,
   koto: 13108, shinagawa: 13109, meguro: 13110, ota: 13111, setagaya: 13112, shibuya: 13113, nakano: 13114, suginami: 13115,
   toshima: 13116, kita: 13117, arakawa: 13118, itabashi: 13119, nerima: 13120, adachi: 13121, katsushika: 13122, edogawa: 13123 };
+const WARDS = ALL_WARDS;   // the map holds all 23 wards
 const TEX_CANDIDATES = [1024, 768, 512, 384, 256];
 const GEOID_OFFSET = 36.71;          // Tokyo: ellipsoid height of mean sea level (m), as in ground.json
 const CELL_M = 20;
