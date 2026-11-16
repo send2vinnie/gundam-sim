@@ -1881,6 +1881,7 @@ void main() {
       setTimeout(() => { try { obj.show = false; } catch (e) { /* tile unloaded */ } }, 350);
       const b = blast || blastOf(obj, pos);   // (measured before the building is marked destroyed)
       if (url !== undefined) { if (!hiddenFeatures.has(url)) hiddenFeatures.set(url, new Set()); hiddenFeatures.get(url).add(id); }
+      addDestroyedBox(pos, b.z);
       collapse(pos, b.k, b.z); return;
     }
     if (obj && obj.primitive && typeof obj.id === "string" && obj.id.startsWith("osm-")) { // OSM building (Nangang)
@@ -1919,7 +1920,47 @@ void main() {
     return false;
   }
   let lastHit = null;
+  // A building is also in PLATEAU's coarser (and other) tiles, under another tile and feature id. Hiding only the one that
+  // was hit let it flash back whenever the camera's distance or side made Cesium draw another tile with it, until the
+  // first tile was drawn again. So a destroyed building also leaves its box (footprint and height, in east/north/up at the
+  // hit), and every building in any loaded tile whose centre lies in a box is hidden too, now and whenever a tile loads.
+  const destroyedBoxes = [];   // { c: centre (world), e, n, u: axes, hw, hd, hh: half sizes (m), r: bounding radius }
+  const featureCentres = new WeakMap();   // tile content -> Map(feature id -> [x, y, z] world centre)
+  function addDestroyedBox(pos, z) {
+    if (!z || !(z.w > 0) || !(z.h > 0)) return;
+    const enu = C.Transforms.eastNorthUpToFixedFrame(pos);
+    const e = C.Cartesian3.fromCartesian4(C.Matrix4.getColumn(enu, 0, new C.Cartesian4())), n = C.Cartesian3.fromCartesian4(C.Matrix4.getColumn(enu, 1, new C.Cartesian4())), u = C.Cartesian3.fromCartesian4(C.Matrix4.getColumn(enu, 2, new C.Cartesian4()));
+    const c = C.Matrix4.multiplyByPoint(enu, new C.Cartesian3(z.cx || 0, z.cy || 0, (z.u0 !== undefined ? z.u0 : -z.h / 2) + z.h / 2), new C.Cartesian3());
+    const box = { c, e, n, u, hw: z.w / 2 + 2, hd: z.d / 2 + 2, hh: z.h / 2 + 3 }; box.r = Math.hypot(box.hw, box.hd, box.hh);
+    destroyedBoxes.push(box); if (destroyedBoxes.length > 400) destroyedBoxes.shift();
+    for (const ts of tilesets) { try { (function walk(t) { if (t.content && t.content.featuresLength) hideInBoxes(t.content, [box]); (t.children || []).forEach(walk); })(ts.root); } catch (er) { /* not ready */ } }
+  }
+  function hideInBoxes(content, boxes) {
+    if (!boxes.length || !content || !content.featuresLength) return;
+    const bs = content.tile && content.tile.boundingSphere;
+    const near = bs ? boxes.filter((b) => C.Cartesian3.distance(bs.center, b.c) < bs.radius + b.r) : boxes; if (!near.length) return;
+    let cen = featureCentres.get(content);
+    if (!cen) {
+      let g = triGrids.get(content);
+      if (g === undefined) { try { g = buildTriGrid(content); } catch (er) { g = false; } if (g !== null) triGrids.set(content, g); }
+      if (!g) return;
+      const acc = new Map(), T = g.T, o = g.o;
+      for (let t = 0; t < g.F.length; t++) { const id = g.F[t]; if (id < 0) continue; let a = acc.get(id); if (!a) acc.set(id, a = [0, 0, 0, 0]);
+        for (let v = 0; v < 3; v++) { const k = t * 9 + v * 3; a[0] += T[k]; a[1] += T[k + 1]; a[2] += T[k + 2]; } a[3] += 3; }
+      cen = new Map(); for (const [id, a] of acc) cen.set(id, [a[0] / a[3] + o[0], a[1] / a[3] + o[1], a[2] / a[3] + o[2]]);
+      featureCentres.set(content, cen);
+    }
+    const url = content.url;
+    for (const [id, p] of cen) for (const b of near) {
+      const dx = p[0] - b.c.x, dy = p[1] - b.c.y, dz = p[2] - b.c.z;
+      if (Math.abs(dx * b.e.x + dy * b.e.y + dz * b.e.z) > b.hw || Math.abs(dx * b.n.x + dy * b.n.y + dz * b.n.z) > b.hd || Math.abs(dx * b.u.x + dy * b.u.y + dz * b.u.z) > b.hh) continue;
+      try { if (id < content.featuresLength) content.getFeature(id).show = false; } catch (er) { /* ignore */ }
+      if (url !== undefined) { if (!hiddenFeatures.has(url)) hiddenFeatures.set(url, new Set()); hiddenFeatures.get(url).add(id); }
+      break;
+    }
+  }
   function reapplyHidden(tile) {
+    if (tile && tile.content) hideInBoxes(tile.content, destroyedBoxes);
     const url = tile && tile.content && tile.content.url;
     for (const e of buildingHp.values()) if (e.color && e.url === url) { try { if (e.id < tile.content.featuresLength) tile.content.getFeature(e.id).color = e.color; } catch (er) { /* ignore */ } }   // damage shading
     const set = tile && tile.content && hiddenFeatures.get(tile.content.url); if (!set) return;
@@ -1932,7 +1973,7 @@ void main() {
     // health and damage shading reset too
     if (localWorld && localWorld.osmPrimitive) for (const e of buildingHp.values()) if (!e.url && e.key) { try { localWorld.osmPrimitive.getGeometryInstanceAttributes(e.key).color = C.ColorGeometryInstanceAttribute.toValue(C.Color.fromCssColorString("#b9b6ae")); } catch (er) { /* ignore */ } }
     buildingHp.clear(); clearDents();
-    hiddenFeatures.clear();
+    hiddenFeatures.clear(); destroyedBoxes.length = 0;
     if (localWorld && localWorld.osmPrimitive) for (const id of hiddenOsm) { try { localWorld.osmPrimitive.getGeometryInstanceAttributes(id).show = C.ShowGeometryInstanceAttribute.toValue(true); } catch (e) { /* ignore */ } }
     hiddenOsm.clear(); destroyedSpots.length = 0;
   }
