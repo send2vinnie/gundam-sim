@@ -241,11 +241,19 @@
   //   lit here with one ambient term and one sun term instead, like the OSM buildings (OSM_FS). Fog still applies after it.
   // * ?distdebug=1: tints the city by distance from the camera (green < 1 km, yellow < 2 km, orange < 3 km, red beyond),
   //   to see where tiles are drawn and tune the draw distance.
+  // * Every quality: buildings without a photo texture (most of the city outside the central districts) are plain white
+  //   in PLATEAU's data, which the sky fill and sun turn into a glare. They get a matt light grey instead, a little
+  //   lighter or darker per building (from its feature id) so blocks of them don't merge into one shape.
+  const UNTEXTURED_GREY = [0.62, 0.63, 0.65];          // sRGB base colour of buildings without a texture (x 0.72 under the brighter PBR light)
   const CITY_LIGHT = { ambient: 0.6, sun: 0.45 };   // Low: base colour x (ambient + sun x cos angle), linear colour
   const DIST_DEBUG = /[?&]distdebug=1\b/.test(location.search);
-  let cityFs = "";
-  if (LOW_GFX || DIST_DEBUG) {
-    cityFs = "void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {\n";
+  let cityFs = "void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {\n" +
+    "#ifndef HAS_BASE_COLOR_TEXTURE\n" +
+    "  float hv = fract(sin(float(fsInput.featureIds.featureId_0) * 12.9898) * 43758.5453);\n" +
+    "  vec3 g = czm_srgbToLinear(vec3(" + UNTEXTURED_GREY.map((v) => (v * (LOW_GFX ? 1 : 0.72)).toFixed(3)).join(", ") + ") * (0.92 + 0.16 * hv));\n" +
+    "  material.baseColor.rgb = g; material.diffuse = g; material.specular = vec3(0.04); material.roughness = 0.9;\n" +
+    "#endif\n";
+  {
     if (LOW_GFX) cityFs += "  float sun = max(dot(normalize(material.normalEC), czm_lightDirectionEC), 0.0);\n" +
       "  material.diffuse = material.baseColor.rgb * (" + CITY_LIGHT.ambient.toFixed(3) + " + " + CITY_LIGHT.sun.toFixed(3) + " * sun);\n";
     if (DIST_DEBUG) cityFs += "  float dm = -fsInput.attributes.positionEC.z;\n" +
@@ -253,8 +261,8 @@
       "  material.diffuse = mix(material.diffuse, czm_srgbToLinear(band), 0.45);\n";
     cityFs += "}\n";
   }
-  const DENT_SHADER = new C.CustomShader(Object.assign({ uniforms: dentUniforms, vertexShaderText: dentVs },
-    cityFs ? { fragmentShaderText: cityFs } : {}, LOW_GFX ? { lightingModel: C.LightingModel.UNLIT } : {}));
+  const DENT_SHADER = new C.CustomShader(Object.assign({ uniforms: dentUniforms, vertexShaderText: dentVs, fragmentShaderText: cityFs },
+    LOW_GFX ? { lightingModel: C.LightingModel.UNLIT } : {}));
   // per building: { fid, url, pos (world, last hit), base (world), up, H, dir (level, away from the hits), lean, warp, amp, side, t }
   const dents = [], osmDents = new Map();   // osm id -> { sag, amp, t, dir, up }
   function crashDent(ue, un, hs) {   // a character crashed into a wall: find the building ahead (one GPU pick) and distort it

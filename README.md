@@ -161,6 +161,10 @@ spherical harmonics, tone mapping), which is the costliest part of each city pix
 The start screen shows 5 pilots instead of 12, and the globe skips its atmosphere tint and uses a coarser ground mesh.
 Anti-aliasing, HDR and shadows were already off on Low.
 
+**Untextured buildings.** PLATEAU has photo textures only for part of the city; the rest are plain white in the data,
+which the sky fill and sun turned into a glare. The city shader gives them a matt light grey, a little lighter or darker
+per building, on every quality.
+
 **City shaders on every quality.** The building-distortion vertex shader (`DENT_SHADER`) runs on every city vertex, so it
 now leaves at once when no building is distorted (a uniform holds the number of distorted buildings, and only those slots
 are tested). Add `?distdebug=1` to the address to tint the city by distance from the camera (green under 1 km, yellow under
