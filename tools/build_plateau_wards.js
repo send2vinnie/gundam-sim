@@ -152,7 +152,7 @@ function writeB3dm(t, json, parts) {
 // PLATEAU's tiles store each triangle with its own three unquantized vertices (Draco "triangle soup", 32-bit floats). Re-encoding
 // shares the vertices and quantizes them (positions 14 bits: about 1 cm on a 200 m tile, normals 10, texture coordinates 12),
 // which makes the geometry about 9 times smaller with no visible change. Feature ids (_BATCHID) stay exact.
-const stats = { dracoKept: 0 };
+const stats = { dracoKept: 0, facesDropped: 0 };
 const ENC_BITS = { POSITION: 14, NORMAL: 10, TEXCOORD_0: 12 };
 function reencodeDraco(json, bytes, pr, ext) {
   const d = new draco.Decoder(), db = new draco.DecoderBuffer(); db.Init(new Int8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), bytes.byteLength);
@@ -185,9 +185,11 @@ function reencodeDraco(json, bytes, pr, ext) {
   const d2 = new draco.Decoder(), db2 = new draco.DecoderBuffer(); db2.Init(new Int8Array(res.buffer, res.byteOffset, res.byteLength), res.byteLength);
   const m2 = new draco.Mesh(); if (!d2.DecodeBufferToMesh(db2, m2).ok()) throw new Error("draco re-decode failed");
   const np2 = m2.num_points(), nf2 = m2.num_faces(); draco.destroy(m2); draco.destroy(db2); draco.destroy(d2);
-  if (nf2 !== nf) throw new Error("draco: face count changed");
+  // the encoder drops degenerate triangles (zero area, so never visible); anything more, or no gain, keeps the original
+  if (nf2 > nf || nf2 < nf * 0.98 || res.length >= bytes.length) { stats.dracoKept++; return bytes; }
+  stats.facesDropped += nf - nf2;
   for (const k of Object.keys(ext.attributes)) json.accessors[pr.attributes[k]].count = np2;
-  if (pr.indices !== undefined) { const a = json.accessors[pr.indices]; a.count = nf * 3; if (np2 > 65535) a.componentType = 5125; }
+  if (pr.indices !== undefined) { const a = json.accessors[pr.indices]; a.count = nf2 * 3; if (np2 > 65535) a.componentType = 5125; }
   ext.attributes = ids;
   return res;
 }
@@ -197,7 +199,11 @@ async function shrinkTile(buf, maxPx) {
   for (const im of json.images || []) if (im.bufferView !== undefined) imgViews.set(im.bufferView, im);
   const dracoViews = new Map();
   for (const m of json.meshes || []) for (const pr of m.primitives) { const ext = pr.extensions && pr.extensions.KHR_draco_mesh_compression; if (ext) dracoViews.set(ext.bufferView, [pr, ext]); }
+  // buffer views nothing refers to any more (the 1.1 tiles' attribute tables) are emptied
+  const used = new Set([...dracoViews.keys(), ...imgViews.keys()]);
+  for (const a of json.accessors || []) if (a.bufferView !== undefined) used.add(a.bufferView);
   const parts = await Promise.all(views.map(async (bv, i) => {
+    if (!used.has(i)) return Buffer.alloc(4);
     const src = Buffer.from(t.bin.subarray(bv.byteOffset || 0, (bv.byteOffset || 0) + bv.byteLength));
     if (dracoViews.has(i)) { const [pr, ext] = dracoViews.get(i); return reencodeDraco(json, src, pr, ext); }
     const im = imgViews.get(i); if (!im) return src;
@@ -378,6 +384,7 @@ function seeded(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 
     for (const d of fs.readdirSync(OUT)) if (fs.statSync(path.join(OUT, d)).isDirectory() && d !== "ground" && !WARDS[d]) { console.log("removing " + d); fs.rmSync(path.join(OUT, d), { recursive: true, force: true }); }
   } else console.log("Partial build: the ground grid was not rebuilt (run without --wards for that).");
   const site = dirBytes(ROOT, (p) => /[\\/](\.git|node_modules)$/.test(p));
-  if (stats.dracoKept) console.log(`${stats.dracoKept} meshes kept their original geometry encoding (could not be re-encoded).`);
+  if (stats.dracoKept) console.log(`${stats.dracoKept} meshes kept their original geometry encoding (could not be re-encoded smaller).`);
+  if (stats.facesDropped) console.log(`${stats.facesDropped} degenerate (zero-area) triangles dropped by the encoder.`);
   console.log(`\nDone: Tokyo map ${(total / 1e6).toFixed(1)} MB with ${tex} px textures; whole published site ≈ ${(site / 1e6).toFixed(1)} MB.`);
 })().catch((e) => { console.error(e); process.exit(1); });
