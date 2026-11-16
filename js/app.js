@@ -116,7 +116,8 @@
     invertY: store.get("invertY", false),
     showFps: store.get("showFps", false),
     autoRes: store.get("autoRes", true),
-    camShake: store.get("impactShake", false)   // off by default (new key, so an older saved "on" does not carry over)
+    camShake: store.get("impactShake", false),   // off by default (new key, so an older saved "on" does not carry over)
+    aerial: store.get("aerialPhotos", true)      // GSI aerial photos on the Tokyo ground (needs a connection)
   };
   // 3D detail: chosen live in Settings. Until the user picks, the defaults follow the graphics quality.
   const CITY_SSE = { verylow: 64, low: 32, medium: 16, high: 8, ultra: 4 };
@@ -367,8 +368,10 @@ void main() {
   const LOCAL_CREDITS = {
     plateau: "3D都市モデル Project PLATEAU（国土交通省）を加工して作成",
     plateauOriginal: "出典：国土交通省 PLATEAU 3D都市モデル（東京都 2025 LOD2）",
-    osm: "© OpenStreetMap contributors (ODbL)"
+    osm: "© OpenStreetMap contributors (ODbL)",
+    gsi: '出典：<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">地理院タイル</a>（国土地理院 全国最新写真（シームレス））'
   };
+  let TOKYO_GROUND_RECT = null;   // degrees: the union of the Tokyo ground grids (set by loadGround)
   async function loadGround() {
     const idx = await (await fetch("cities/tokyo/ground.json")).json();
     const areas = await Promise.all(idx.areas.map(async (a) => {
@@ -391,8 +394,40 @@ void main() {
       const v = (x, y) => a.data[y * n + x] / 10;
       return (v(x0, y0) * (1 - tx) + v(x1, y0) * tx) * (1 - ty) + (v(x0, y1) * (1 - tx) + v(x1, y1) * tx) * ty;
     }
+    TOKYO_GROUND_RECT = areas.reduce((r, a) => r ? { west: Math.min(r.west, a.west), south: Math.min(r.south, a.south), east: Math.max(r.east, a.east), north: Math.max(r.north, a.north) }
+      : { west: a.west, south: a.south, east: a.east, north: a.north }, null);
     return { heightAt, geoidOffset: idx.geoidOffset };
   }
+  // Aerial photos on the Tokyo ground: GSI's seamless photo tiles (地理院タイル, 全国最新写真), laid over the grid only within
+  // the Tokyo map (plus the margin where its ground height is held), so roads, rivers, parks and the bay show under the
+  // buildings. They stream from GSI's servers (CORS *) and are never cached by the service worker (it ignores other sites),
+  // only by the browser's own HTTP cache. Offline, or where a tile fails, the grey grid below shows through; the Taipei
+  // start screen keeps the grid. Low stops at zoom 16 (about 2 m a pixel) instead of 18 (about 0.5 m) to save data and
+  // memory; its far plane and fog already cut the ground at RENDER_DISTANCE. Fog applies to the photos like to the grid.
+  let aerialLayer = null;
+  const GSI_PHOTO_URL = "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg";
+  function addAerialPhotos() {
+    const M = 0.2, a = TOKYO_GROUND_RECT;   // degrees, same margin as loadGround
+    if (!a) return;
+    const provider = new C.UrlTemplateImageryProvider({
+      url: GSI_PHOTO_URL,
+      rectangle: C.Rectangle.fromDegrees(a.west - M, a.south - M, a.east + M, a.north + M),
+      minimumLevel: 2, maximumLevel: LOW_GFX ? 16 : 18,
+      credit: new C.Credit(LOCAL_CREDITS.gsi, true)
+    });
+    // a listener keeps Cesium from logging every failed tile (offline, or outside GSI's coverage): the grid shows there
+    let failed = 0;
+    provider.errorEvent.addEventListener((err) => { if (++failed === 1) console.warn("GSI aerial photo tiles unavailable here; showing the grid", err && err.error); });
+    aerialLayer = viewer.imageryLayers.addImageryProvider(provider);
+    showAerial(camera.positionCartographic);
+  }
+  // shown only near Tokyo (within about 1 degree of the map), so the Taipei start screen requests no photos and shows no GSI credit
+  function showAerial(c) {
+    if (!aerialLayer) return;
+    const a = TOKYO_GROUND_RECT, lon = c.longitude / DEG, lat = c.latitude / DEG;
+    aerialLayer.show = settings.aerial && lon > a.west - 1 && lon < a.east + 1 && lat > a.south - 1 && lat < a.north + 1;
+  }
+
   async function initLocalWorld() {
     const ground = await loadGround();
     const W = 33, H = 33;
@@ -416,6 +451,7 @@ void main() {
       cells: 4, color: C.Color.fromCssColorString("#ffffff").withAlpha(0.08),
       glowColor: C.Color.TRANSPARENT, backgroundColor: C.Color.fromCssColorString("#4a4f55"), tileWidth: 256, tileHeight: 256
     }));
+    addAerialPhotos();
     // Tokyo areas stream in when the camera comes near them and are dropped (memory freed) when it leaves, so the start
     // screen in Taipei loads no Tokyo tiles at all and a flight keeps only the area(s) around it.
     await Promise.all(LOCAL_WARDS.map(async (w) => {
@@ -494,6 +530,7 @@ void main() {
     if (!wardSlots.length || (!force && performance.now() - wardCheckT < 1000)) return;
     wardCheckT = performance.now();
     const c = camera.positionCartographic;
+    showAerial(c);
     for (const s of wardSlots) {
       const d = wardDistance(s, c.longitude, c.latitude);
       if (d < WARD_LOAD_M) s.want = true; else if (d > WARD_DROP_M) s.want = false;
@@ -2591,8 +2628,9 @@ void main() {
   $("menuBtn").onclick = togglePause;
   const openSettings = () => {
     $("qualitySelect").value = settings.quality;
-    $("invertY").checked = settings.invertY; $("showFps").checked = settings.showFps; $("autoRes").checked = settings.autoRes; $("camShake").checked = settings.camShake; $("settingsDlg").showModal();
+    $("invertY").checked = settings.invertY; $("showFps").checked = settings.showFps; $("autoRes").checked = settings.autoRes; $("camShake").checked = settings.camShake; $("aerialPhotos").checked = settings.aerial; $("settingsDlg").showModal();
   };
+  $("aerialPhotos").onchange = () => { settings.aerial = $("aerialPhotos").checked; showAerial(camera.positionCartographic); };   // live, and saved with Save
   $("settingsBtn").onclick = openSettings; $("pSettingsBtn").onclick = openSettings;
   $("cityDetail").value = settings.cityDetail; $("modelDetail").value = settings.modelDetail;
   $("cityDetail").onchange = () => {
@@ -2603,7 +2641,7 @@ void main() {
   updateDetailInfo();
   $("saveSettings").onclick = () => {
     store.set("quality", $("qualitySelect").value);
-    store.set("invertY", $("invertY").checked); store.set("showFps", $("showFps").checked); store.set("autoRes", $("autoRes").checked); store.set("impactShake", $("camShake").checked);
+    store.set("invertY", $("invertY").checked); store.set("showFps", $("showFps").checked); store.set("autoRes", $("autoRes").checked); store.set("impactShake", $("camShake").checked); store.set("aerialPhotos", $("aerialPhotos").checked);
     setTimeout(() => location.reload(), 50);
   };
   $("helpBtn").onclick = () => $("helpDlg").showModal(); $("pHelpBtn").onclick = () => $("helpDlg").showModal();
