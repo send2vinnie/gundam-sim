@@ -8,10 +8,17 @@ is needed. It runs in Chrome or Edge on **Windows** and Chrome on **Android**, a
 The game uses only its own local city maps, stored with the game and cached on the device as you visit areas, so they also
 work offline afterwards:
 * Tokyo: the Japanese government's open 3D city model [Project PLATEAU](https://www.mlit.go.jp/plateau/) (MLIT, 2025, LOD2
-  buildings with photo textures where PLATEAU has them). About 1.5 km around each starting point: Nishi-Shinjuku, Shibuya,
-  Tokyo Tower, Tokyo Station / Marunouchi, Skytree and Odaiba (`cities/tokyo/<ward>/tileset.json`, 653 MB in total).
-  Tiles were clipped to those areas, the building attribute tables were removed and texture atlases were reduced to
-  1024 px. The ground under the buildings is built from each building's surveyed base height (`cities/tokyo/ground/`).
+  buildings with photo textures where PLATEAU has them). One connected map of eight whole wards: Shinjuku, Shibuya,
+  Minato, Chiyoda, Chuo, Taito, Sumida and Koto (`cities/tokyo/<ward>/tileset.json`), so you can fly between all six
+  starting points (Nishi-Shinjuku, Shibuya, Tokyo Tower, Tokyo Station / Marunouchi, Skytree, Odaiba) over real city.
+  The map is built by `tools/build_plateau_wards.js` (run on a computer that can reach PLATEAU, see *Rebuilding the map*):
+  * **Geometry re-encoded.** PLATEAU's tiles store every triangle with its own three full-precision corners. The tool
+    re-encodes them with shared corners and quantized values (positions to about 1 cm), which makes the geometry about
+    9 times smaller with no visible change; the tile tree, levels of detail, file names and building ids stay PLATEAU's.
+  * **Textures reduced** (4096 px originals) to the largest size that keeps the whole site under GitHub Pages' 1 GB limit,
+    at most 1024 px. The building attribute tables are removed.
+  * **Ground:** one height grid for the whole map (`cities/tokyo/ground/tokyo.bin`, 20 m cells) from each building's
+    surveyed base height, filled in between for streets, parks, rivers and the bay.
 * Nangang start screen: OpenStreetMap building footprints within 1 km of the Exhibition Center, extruded from their
   `height` / `building:levels` (+ `roof:levels`) tags, with `min_height` bases and multipolygon holes
   (`cities/taipei/nangang-osm-v2.geojson`, rebuilt with `node --use-system-ca tools/build_nangang_osm.js [radius_m]`).
@@ -28,8 +35,18 @@ tiles are, and reuses the bundled `tileset.json` with each tile pointing at its 
 cross-site requests (CORS `*`). The originals are not stored by the game or cached by its service worker (only the browser's
 own HTTP cache keeps them, for an hour). If the catalog can't be reached, or an area's tiles fail 3 times, that area
 falls back to the bundled copy. The data is used under the PLATEAU site policy (PDL 1.0, compatible with CC BY 4.0), with
-the source credit on screen and in Credits. Low and Medium always use the bundled copies (and Low halves their textures
-again in the browser); High never reduces the textures.
+the source credit on screen and in Credits. Low and Medium always use the bundled copies exactly as stored; High never
+reduces the textures.
+
+**Rebuilding the map.** On a computer that can reach PLATEAU (about 5 GB of free disk for the download cache):
+```
+cd tools && npm install && cd ..
+node --use-system-ca tools/build_plateau_wards.js            # all eight wards, texture size chosen to fit 950 MB
+node --use-system-ca tools/build_plateau_wards.js --tex 512  # or a fixed texture size
+```
+It downloads each ward once into `../plateau-cache` (reused on later runs), prints the estimated site size for each
+texture size, writes `cities/tokyo/`, and removes map folders that are no longer used. After a rebuild, bump
+`CITY_CACHE` in `sw.js` so installed apps fetch the new map.
 
 The start-screen location and the Tokyo starting points are `LOBBY` and `SPAWNS` near the top of `js/app.js`.
 `config.js` is no longer used.
@@ -136,13 +153,22 @@ Measured in Shinjuku from 250 m up: draw calls 448 -> 99, city tiles drawn 53 ->
 textures 379 -> 204 MB (measured with the earlier 2 km limit). Low is also capped at **30 FPS** (steadier frames, less heat
 and battery); a paused game draws at 10 FPS.
 
-Low also uses **half-size city textures**: each Tokyo tile is rewritten in the browser as it arrives (its WebP images scaled
-to half width and height, a quarter of the GPU memory), so the stored data stays the same for Medium and High. The tile
-memory budget is halved to match (64 MB + 32 MB per area). The start screen shows 5 pilots instead of 12, and the globe
-skips its atmosphere tint and uses a coarser ground mesh. Anti-aliasing, HDR and shadows were already off on Low; the sky
-fill light stays on, because without it walls facing away from the sun turn black.
-Measured with step 2 (software renderer, automatic resolution on): start screen 74 -> 69 ms/frame and draw calls
-269 -> 154; Shinjuku at 250 m 140 -> 130 ms/frame, city textures 206 -> 60 MB.
+Low draws the bundled city textures at their stored size (an earlier version halved them again in the browser; that was
+removed so the tiles look the same as on Medium), with a tile memory budget of 128 MB + 64 MB per area. Instead, Low saves
+GPU time with a **simple lighting shader** on the city: the tiles are drawn unlit and lit in a custom fragment shader with one
+ambient and one sun term (`CITY_LIGHT` in `js/app.js`), instead of Cesium's full PBR lighting (sun specular, sky-fill
+spherical harmonics, tone mapping), which is the costliest part of each city pixel. Fog is still applied after it.
+The start screen shows 5 pilots instead of 12, and the globe skips its atmosphere tint and uses a coarser ground mesh.
+Anti-aliasing, HDR and shadows were already off on Low.
+
+**Untextured buildings.** PLATEAU has photo textures only for part of the city; the rest are plain white in the data,
+which the sky fill and sun turned into a glare. The city shader gives them a matt light grey, a little lighter or darker
+per building, on every quality.
+
+**City shaders on every quality.** The building-distortion vertex shader (`DENT_SHADER`) runs on every city vertex, so it
+now leaves at once when no building is distorted (a uniform holds the number of distorted buildings, and only those slots
+are tested). Add `?distdebug=1` to the address to tint the city by distance from the camera (green under 1 km, yellow under
+2 km, orange under 3 km, red beyond), to see what is drawn where and tune draw distances.
 
 **Choosing Low automatically.** On first launch, phones and weak computers (4 GB memory or less, 2 CPU cores or less, or
 a software-only GPU) start on Low. Otherwise the start screen measures the frame rate once (after a 3 s warm-up, over 6 s):
@@ -161,10 +187,11 @@ On every quality setting:
   Measured on a laptop (NVIDIA T1200, Nishi-Shinjuku): Medium low flight 14.5 -> 23 FPS, walking 4.6 -> 15.6 FPS, hover and
   firing 50-52 -> 60 FPS; Low low flight 20 -> 29 FPS (its 30 FPS cap) with the worst frames 126 -> 43 ms.
 * **Low: the texture downscale runs in a worker**, so streaming city tiles doesn't stall the frame.
-* **Profiler:** add `?profile=1` to the address for an overlay with the time per frame (ms) of each part of the update
+* **Profiler:** add `?profile=1` to the address for an overlay with the GPU time of each frame (`gpu`, from a WebGL 2 timer
+  query; shader changes show up here, not in the CPU times; "n/a" where the browser doesn't offer the timer), the time per frame (ms) of each part of the update
   (area streaming, flight: ground and walls / physics / pose / HUD, weapons and effects, camera, start screen), Cesium's
   render, the frame time, the FPS, the time in GPU picks and the share of frames that pick.
-* **Tokyo areas stream by distance.** Each of the 6 Tokyo areas is opened when the camera comes within the draw distance
+* **Tokyo wards stream by distance.** Each of the 8 Tokyo wards is opened when the camera comes within the draw distance
   + 1 km of it (Low 4 km, others 7 km) and dropped, freeing its memory, 1.5 km beyond that. The Taipei start screen loads no
   Tokyo tiles at all.
 * **Automatic resolution** (Settings, on by default). Every 2 s the game checks the frame rate: below 85 % of the target

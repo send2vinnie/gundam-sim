@@ -195,79 +195,6 @@
     scene.globe.showGroundAtmosphere = false; scene.globe.maximumScreenSpaceError = 4; }
   const nearOnly = () => (LOW_GFX ? new C.DistanceDisplayCondition(0, 450) : undefined);   // small props: pilots, dragon scene
 
-  // Low: half-size city textures. Each Tokyo tile (b3dm) is rewritten as it arrives, before Cesium reads it: its embedded
-  // images are scaled to half width and height (a quarter of the GPU memory) and stored back in their format (WebP). Any problem keeps
-  // the original tile. Tiles are patched in the browser so the stored city data stays the same for Medium and High.
-  if (LOW_GFX && typeof createImageBitmap === "function" && typeof OffscreenCanvas === "function") {
-    const origFetch = C.Resource.prototype.fetchArrayBuffer;
-    C.Resource.prototype.fetchArrayBuffer = function () {
-      const p = origFetch.apply(this, arguments);
-      if (!p || !/\/cities\/tokyo\/.*\.b3dm/.test(this.url)) return p;   // undefined = throttled; Cesium retries later
-      return p.then((buf) => (texWorker.ready ? halveInWorker(buf) : halveB3dmTextures(buf)).catch((e) => { console.warn("texture downscale skipped", e); return buf; }));
-    };
-  }
-  // The downscale (decode, draw, WebP encode) runs in a worker, so streaming tiles doesn't stall the frame; it was about
-  // 15% of the main thread's time in low flight. Until the worker reports ready (or if it can't start) it runs here.
-  const texWorker = { ready: false, w: null, next: 0, pending: new Map() };
-  function halveInWorker(buf) {
-    return new Promise((resolve) => { const id = texWorker.next++; texWorker.pending.set(id, resolve); texWorker.w.postMessage({ id, buf }, [buf]); });
-  }
-  if (LOW_GFX && typeof Worker === "function" && typeof OffscreenCanvas === "function") {
-    try {
-      const src = "const halveB3dmTextures = " + halveB3dmTextures.toString() + ";\n" +
-        "self.onmessage = async (e) => { let out; try { out = await halveB3dmTextures(e.data.buf); } catch (x) { out = e.data.buf; } self.postMessage({ id: e.data.id, buf: out }, [out]); };\n" +
-        "self.postMessage({ ready: typeof createImageBitmap === 'function' && typeof OffscreenCanvas === 'function' });";
-      const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
-      texWorker.w = new Worker(url);
-      texWorker.w.onmessage = (e) => { if (e.data && e.data.ready !== undefined) { texWorker.ready = !!e.data.ready; return; }
-        const r = texWorker.pending.get(e.data.id); texWorker.pending.delete(e.data.id); if (r) r(e.data.buf); };
-      texWorker.w.onerror = () => { texWorker.ready = false; };
-    } catch (e) { texWorker.ready = false; }
-  }
-  async function halveB3dmTextures(buf) {
-    const dv = new DataView(buf), u8 = new Uint8Array(buf);
-    if (dv.getUint32(0, true) !== 0x6d643362) return buf;   // "b3dm"
-    const head = 28 + dv.getUint32(12, true) + dv.getUint32(16, true) + dv.getUint32(20, true) + dv.getUint32(24, true);
-    const g = head; if (dv.getUint32(g, true) !== 0x46546c67) return buf;   // "glTF"
-    const jsonLen = dv.getUint32(g + 12, true);
-    const json = JSON.parse(new TextDecoder().decode(u8.subarray(g + 20, g + 20 + jsonLen)));
-    const binStart = g + 20 + jsonLen + 8, views = json.bufferViews || [];
-    const imgViews = new Map();
-    for (const im of json.images || []) if (im.bufferView !== undefined && /jpeg|png|webp/.test(im.mimeType || "")) imgViews.set(im.bufferView, im);
-    if (!imgViews.size) return buf;
-    const webpLost = new Set();
-    const parts = await Promise.all(views.map(async (bv, i) => {
-      const src = u8.subarray(binStart + (bv.byteOffset || 0), binStart + (bv.byteOffset || 0) + bv.byteLength);
-      const im = imgViews.get(i); if (!im) return src;
-      const bmp = await createImageBitmap(new Blob([src], { type: im.mimeType }));
-      if (bmp.width < 128 || bmp.height < 128) { bmp.close(); return src; }
-      const cv = new OffscreenCanvas(bmp.width >> 1, bmp.height >> 1);
-      cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height); bmp.close();
-      // keep WebP (PLATEAU tiles use EXT_texture_webp); browsers that cannot encode it return PNG, which then becomes the plain source
-      const blob = await cv.convertToBlob({ type: im.mimeType === "image/png" ? "image/png" : im.mimeType, quality: 0.85 });
-      if (blob.type !== im.mimeType) { im.mimeType = blob.type; webpLost.add(im); }
-      return new Uint8Array(await blob.arrayBuffer());
-    }));
-    if (webpLost.size) {   // an image is no longer WebP: point its textures at it directly instead of through the WebP extension
-      const idx = new Set([...webpLost].map((im) => json.images.indexOf(im)));
-      for (const t of json.textures || []) { const w = t.extensions && t.extensions.EXT_texture_webp; if (w && idx.has(w.source)) { t.source = w.source; delete t.extensions.EXT_texture_webp; } }
-    }
-    let off = 0;   // repack the binary chunk (4-byte aligned); accessors stay valid, their offsets are view-relative
-    views.forEach((bv, i) => { off = (off + 3) & ~3; bv.byteOffset = off; bv.byteLength = parts[i].length; off += parts[i].length; });
-    const binLen = (off + 3) & ~3; json.buffers[0].byteLength = off;
-    let jsonBytes = new TextEncoder().encode(JSON.stringify(json));
-    const jsonPad = (4 - (jsonBytes.length % 4)) % 4;
-    const glbLen = 12 + 8 + jsonBytes.length + jsonPad + 8 + binLen;
-    const out = new Uint8Array(head + glbLen), o = new DataView(out.buffer);
-    out.set(u8.subarray(0, head)); o.setUint32(8, out.length, true);
-    o.setUint32(g, 0x46546c67, true); o.setUint32(g + 4, 2, true); o.setUint32(g + 8, glbLen, true);
-    o.setUint32(g + 12, jsonBytes.length + jsonPad, true); o.setUint32(g + 16, 0x4e4f534a, true);   // "JSON"
-    out.set(jsonBytes, g + 20); out.fill(0x20, g + 20 + jsonBytes.length, g + 20 + jsonBytes.length + jsonPad);
-    const b = g + 20 + jsonBytes.length + jsonPad;
-    o.setUint32(b, binLen, true); o.setUint32(b + 4, 0x004e4942, true);   // "BIN"
-    views.forEach((bv, i) => out.set(parts[i], b + 8 + bv.byteOffset));
-    return out.buffer;
-  }
   scene.highDynamicRange = false;
   viewer.clock.shouldAnimate = true;
   viewer.clock.multiplier = 1;
@@ -293,20 +220,49 @@
   // and sinks a little (sags) with each hit. Rebuild city resets all of it. (Collisions and height queries still use the
   // undistorted shapes.)
   const DENT_SLOTS = LOW_GFX ? 4 : 8;
-  const dentUniforms = {}; for (let i = 0; i < DENT_SLOTS; i++) for (const [n, v] of [["u_dp", [0, 0, 0, -1]], ["u_db", [0, 0, 0, 1]], ["u_du", [0, 1, 0, 0]], ["u_dd", [0, 0, 1, 0]], ["u_da", [0, 0, 9, 0]]])
+  const dentUniforms = { u_dn: { type: C.UniformType.FLOAT, value: 0 } }; for (let i = 0; i < DENT_SLOTS; i++) for (const [n, v] of [["u_dp", [0, 0, 0, -1]], ["u_db", [0, 0, 0, 1]], ["u_du", [0, 1, 0, 0]], ["u_dd", [0, 0, 1, 0]], ["u_da", [0, 0, 9, 0]]])
     dentUniforms[n + i] = { type: C.UniformType.VEC4, value: new C.Cartesian4(v[0], v[1], v[2], v[3]) };
   // u_dp: hit point (EC), feature id; u_db: base point (EC), height H (m); u_du: up (EC), warp (m); u_dd: lean direction
   // (EC, level, away from the hits), lean at the top (m); u_da: shudder axis (EC, level, across the shot), amplitude (m) in w,
   // time since the last hit in... (packed: u_da.xyz axis scaled by amplitude, u_da.w time)
-  let dentVs = "void vertexMain(VertexInput vsInput, inout czm_modelVertexOutput vsOutput) {\n  float fid = float(vsInput.featureIds.featureId_0);\n  vec3 pEC = (czm_modelView * vec4(vsOutput.positionMC, 1.0)).xyz;\n  vec3 pm = vsOutput.positionMC;\n  vec3 off = vec3(0.0);\n";
-  for (let i = 0; i < DENT_SLOTS; i++) dentVs += `  if (abs(fid - u_dp${i}.w) < 0.5 && distance(pEC, u_dp${i}.xyz) < u_db${i}.w * 1.5 + 80.0) {
+  // u_dn: number of slots in use. With no dented building (most frames) every city vertex leaves at once, and only the
+  // slots in use are tested, so the shader costs nothing until a building is hit.
+  let dentVs = "void vertexMain(VertexInput vsInput, inout czm_modelVertexOutput vsOutput) {\n  if (u_dn < 0.5) return;\n  float fid = float(vsInput.featureIds.featureId_0);\n  vec3 pEC = (czm_modelView * vec4(vsOutput.positionMC, 1.0)).xyz;\n  vec3 pm = vsOutput.positionMC;\n  vec3 off = vec3(0.0);\n";
+  for (let i = 0; i < DENT_SLOTS; i++) dentVs += `  if (u_dn > ${i}.5 && abs(fid - u_dp${i}.w) < 0.5 && distance(pEC, u_dp${i}.xyz) < u_db${i}.w * 1.5 + 80.0) {
     float h = clamp(dot(pEC - u_db${i}.xyz, u_du${i}.xyz) / u_db${i}.w, 0.0, 1.0);
     vec3 up = u_du${i}.xyz, ld = u_dd${i}.xyz, sx = normalize(cross(ld, up));
     float t = u_da${i}.w, sh = sin(t * 60.0) * exp(-t * 7.0);
     float w = u_du${i}.w * h;   // warp: corners pushed out of true, each by its own amount (fixed in model space)
     off += ld * u_dd${i}.w * h * h + u_da${i}.xyz * sh * h + (ld * sin(pm.x * 0.37 + pm.y * 0.23 + pm.z * 0.11) + sx * sin(pm.y * 0.31 - pm.z * 0.27 + pm.x * 0.13)) * w; }\n`;
   dentVs += "  vsOutput.positionMC += (czm_inverseModelView * vec4(off, 0.0)).xyz;\n}\n";
-  const DENT_SHADER = new C.CustomShader({ uniforms: dentUniforms, vertexShaderText: dentVs });
+  // City fragment shader (same CustomShader, since a tileset takes one):
+  // * Low: simple lighting. The tiles' PBR lighting (sun specular, sky-fill spherical harmonics, tone mapping) is the
+  //   costliest part of drawing a city pixel, and phones are limited by pixel work. On Low the tiles are drawn UNLIT and
+  //   lit here with one ambient term and one sun term instead, like the OSM buildings (OSM_FS). Fog still applies after it.
+  // * ?distdebug=1: tints the city by distance from the camera (green < 1 km, yellow < 2 km, orange < 3 km, red beyond),
+  //   to see where tiles are drawn and tune the draw distance.
+  // * Every quality: buildings without a photo texture (most of the city outside the central districts) are plain white
+  //   in PLATEAU's data, which the sky fill and sun turn into a glare. They get a matt light grey instead, a little
+  //   lighter or darker per building (from its feature id) so blocks of them don't merge into one shape.
+  const UNTEXTURED_GREY = [0.62, 0.63, 0.65];          // sRGB base colour of buildings without a texture (x 0.72 under the brighter PBR light)
+  const CITY_LIGHT = { ambient: 0.6, sun: 0.45 };   // Low: base colour x (ambient + sun x cos angle), linear colour
+  const DIST_DEBUG = /[?&]distdebug=1\b/.test(location.search);
+  let cityFs = "void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {\n" +
+    "#ifndef HAS_BASE_COLOR_TEXTURE\n" +
+    "  float hv = fract(sin(float(fsInput.featureIds.featureId_0) * 12.9898) * 43758.5453);\n" +
+    "  vec3 g = czm_srgbToLinear(vec3(" + UNTEXTURED_GREY.map((v) => (v * (LOW_GFX ? 1 : 0.72)).toFixed(3)).join(", ") + ") * (0.92 + 0.16 * hv));\n" +
+    "  material.baseColor.rgb = g; material.diffuse = g; material.specular = vec3(0.04); material.roughness = 0.9;\n" +
+    "#endif\n";
+  {
+    if (LOW_GFX) cityFs += "  float sun = max(dot(normalize(material.normalEC), czm_lightDirectionEC), 0.0);\n" +
+      "  material.diffuse = material.baseColor.rgb * (" + CITY_LIGHT.ambient.toFixed(3) + " + " + CITY_LIGHT.sun.toFixed(3) + " * sun);\n";
+    if (DIST_DEBUG) cityFs += "  float dm = -fsInput.attributes.positionEC.z;\n" +
+      "  vec3 band = dm < 1000.0 ? vec3(0.1, 0.9, 0.2) : dm < 2000.0 ? vec3(0.95, 0.9, 0.1) : dm < 3000.0 ? vec3(1.0, 0.5, 0.05) : vec3(0.95, 0.1, 0.1);\n" +
+      "  material.diffuse = mix(material.diffuse, czm_srgbToLinear(band), 0.45);\n";
+    cityFs += "}\n";
+  }
+  const DENT_SHADER = new C.CustomShader(Object.assign({ uniforms: dentUniforms, vertexShaderText: dentVs, fragmentShaderText: cityFs },
+    LOW_GFX ? { lightingModel: C.LightingModel.UNLIT } : {}));
   // per building: { fid, url, pos (world, last hit), base (world), up, H, dir (level, away from the hits), lean, warp, amp, side, t }
   const dents = [], osmDents = new Map();   // osm id -> { sag, amp, t, dir, up }
   function crashDent(ue, un, hs) {   // a character crashed into a wall: find the building ahead (one GPU pick) and distort it
@@ -356,10 +312,13 @@
   }
   const scratchDentP = new C.Cartesian3();
   function updateDents(dt) {   // each frame: advance the shudders and hand the slots to the shader in eye coordinates
+    const n = Math.min(dents.length, DENT_SLOTS);
+    if (n !== DENT_SHADER.uniforms.u_dn.value) DENT_SHADER.setUniform("u_dn", n);
+    if (!n) return updateOsmDents(dt);
     const V = camera.viewMatrix, ec = (p) => C.Matrix4.multiplyByPoint(V, p, scratchDentP), ev = (v) => C.Matrix4.multiplyByPointAsVector(V, v, scratchDentP);
     for (let i = 0; i < DENT_SLOTS; i++) {
       const d = dents[i];
-      if (!d) { DENT_SHADER.setUniform("u_dp" + i, new C.Cartesian4(0, 0, 0, -1)); continue; }
+      if (!d) continue;   // unused slots are skipped by u_dn
       d.t += dt;
       let q = ec(d.pos); DENT_SHADER.setUniform("u_dp" + i, new C.Cartesian4(q.x, q.y, q.z, d.fid));
       q = ec(d.base); DENT_SHADER.setUniform("u_db" + i, new C.Cartesian4(q.x, q.y, q.z, d.H));
@@ -367,6 +326,9 @@
       q = ev(d.dir); DENT_SHADER.setUniform("u_dd" + i, new C.Cartesian4(q.x, q.y, q.z, d.lean));
       const a = d.t < 1.2 ? d.amp : 0; q = ev(d.side); DENT_SHADER.setUniform("u_da" + i, new C.Cartesian4(q.x * a, q.y * a, q.z * a, d.t));
     }
+    updateOsmDents(dt);
+  }
+  function updateOsmDents(dt) {
     if (osmDents.size && localWorld && localWorld.osmPrimitive) for (const [id, e] of osmDents) {
       if (e.done) continue;
       e.t += dt; const sh = e.amp * Math.sin(e.t * 60) * Math.exp(-e.t * 7);
@@ -399,7 +361,9 @@ void main() {
   // ---- local (offline) city -------------------------------------------------
   // PLATEAU tiles use ellipsoidal heights. The ground under them is a terrain built from each building's base height
   // (cities/tokyo/ground.json + .bin grids), so streets, roofs and landing all line up. Elsewhere the ground is the ellipsoid.
-  const LOCAL_WARDS = ["shinjuku", "shibuya", "minato", "chiyoda", "sumida", "koto"];
+  // whole wards (tools/build_plateau_wards.js), so the city is one connected map; Chuo and Taito fill the gap between
+  // Tokyo Station and Skytree
+  const LOCAL_WARDS = ["shinjuku", "shibuya", "minato", "chiyoda", "chuo", "taito", "sumida", "koto"];
   const LOCAL_CREDITS = {
     plateau: "3D都市モデル Project PLATEAU（国土交通省）を加工して作成",
     plateauOriginal: "出典：国土交通省 PLATEAU 3D都市モデル（東京都 2025 LOD2）",
@@ -455,7 +419,8 @@ void main() {
     // Tokyo areas stream in when the camera comes near them and are dropped (memory freed) when it leaves, so the start
     // screen in Taipei loads no Tokyo tiles at all and a flight keeps only the area(s) around it.
     await Promise.all(LOCAL_WARDS.map(async (w) => {
-      const j = await (await fetch("cities/tokyo/" + w + "/tileset.json")).json();
+      let j; try { const r = await fetch("cities/tokyo/" + w + "/tileset.json"); if (!r.ok) throw new Error(r.status); j = await r.json(); }
+      catch (e) { console.warn("no local map for " + w, e); return; }   // a ward not built (yet) is simply left out
       const [west, south, east, north] = j.root.boundingVolume.region;
       wardSlots.push({ name: w, west, south, east, north, ts: null, loading: null, want: false, json: HIGH_GFX ? j : null, original: false, failed: 0 });
     }));
@@ -472,11 +437,11 @@ void main() {
     return Math.hypot(dx * R_EARTH * Math.cos(lat), dy * R_EARTH);
   }
   // High: PLATEAU's original full-detail tiles, streamed from PLATEAU's public 3D Tiles hosting (the PLATEAU VIEW data
-  // catalog, CORS open). The bundled copies are the same tile tree, clipped to the play areas with textures reduced to
-  // 1024 px, so the bundled tileset.json is reused with each tile pointing at its original: the same areas, levels of
+  // catalog, CORS open). The bundled copies are the same tile tree (whole wards, geometry re-encoded, textures reduced),
+  // so the bundled tileset.json is reused with each tile pointing at its original: the same areas, levels of
   // detail and feature ids, only sharper textures. The official catalog API gives the current location of each ward's
   // tiles. If it can't be reached, or tiles keep failing, that area falls back to the bundled copy.
-  const PLATEAU_CODES = { shinjuku: 13104, shibuya: 13113, minato: 13103, chiyoda: 13101, sumida: 13107, koto: 13108 };
+  const PLATEAU_CODES = { shinjuku: 13104, shibuya: 13113, minato: 13103, chiyoda: 13101, chuo: 13102, taito: 13106, sumida: 13107, koto: 13108 };
   async function originalWardUrl(s) {
     const r = await fetch("https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/" + PLATEAU_CODES[s.name] + "-bldg-lod2-texture-2025/tileset.json");
     if (!r.ok) throw new Error("PLATEAU catalog " + r.status);
@@ -500,8 +465,8 @@ void main() {
         maximumScreenSpaceError: CITY_SSE[settings.cityDetail],
         // the originals' textures are 4096 px (16 times the bundled 1024 px), so they get a bigger budget: 1.5 GB per area.
         // Past it Cesium draws coarser tiles until the memory fits (see README: High graphics).
-        cacheBytes: s.original ? 1536 * 1024 * 1024 : LOW_GFX ? 64 * 1024 * 1024 : lowMem ? 128 * 1024 * 1024 : Math.min(QUALITY.cacheBytes, 512 * 1024 * 1024),
-        maximumCacheOverflowBytes: LOW_GFX ? 32 * 1024 * 1024 : undefined,   // Low: half-size textures, so half the budget gives the same detail
+        cacheBytes: s.original ? 1536 * 1024 * 1024 : (LOW_GFX || lowMem) ? 128 * 1024 * 1024 : Math.min(QUALITY.cacheBytes, 512 * 1024 * 1024),
+        maximumCacheOverflowBytes: LOW_GFX ? 64 * 1024 * 1024 : undefined,
         cullRequestsWhileMoving: true, cullRequestsWhileMovingMultiplier: LOW_GFX ? 30 : 60,   // skip tile requests while the camera moves fast
         dynamicScreenSpaceError: true,
         enablePick: true,   // keep a CPU copy of the geometry for the CPU height/ray queries (else each one reads it back from the GPU)
@@ -2542,12 +2507,29 @@ void main() {
   if (PROF) {
     for (const f of ["sampleHeight", "pickFromRay", "drillPickFromRay", "pick", "drillPick"]) { const o = scene[f].bind(scene);
       scene[f] = (...a) => { const t = performance.now(); try { return o(...a); } finally { PROF.add("pick:" + f, t); PROF.picks++; } }; }
-    scene.preRender.addEventListener(() => { PROF.tr = performance.now(); });
-    scene.postRender.addEventListener(() => { const n = performance.now(); PROF.add("render", PROF.tr); PROF.frames++; if (PROF.picks) PROF.pickFrames++; PROF.picks = 0;
+    // GPU time of Cesium's render (shader changes show up here, not in the CPU times): a WebGL 2 timer query around each
+    // frame, read back a few frames later without waiting. Chrome offers the timer extension on most desktop GPUs; where it
+    // doesn't, the overlay shows "gpu n/a".
+    const gl = scene.context.webgl2 ? scene.context._gl : null, tq = gl && gl.getExtension("EXT_disjoint_timer_query_webgl2");
+    const gpu = { active: null, pending: [], free: [], ms: 0, n: 0 };
+    const gpuPoll = () => {
+      while (gpu.pending.length && gl.getQueryParameter(gpu.pending[0], gl.QUERY_RESULT_AVAILABLE)) {
+        const q = gpu.pending.shift();
+        if (!gl.getParameter(tq.GPU_DISJOINT_EXT)) { gpu.ms += gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; gpu.n++; }
+        gpu.free.push(q);
+      }
+    };
+    scene.preRender.addEventListener(() => { PROF.tr = performance.now();
+      if (tq && !gpu.active && gpu.pending.length < 8) { gpu.active = gpu.free.pop() || gl.createQuery(); gl.beginQuery(tq.TIME_ELAPSED_EXT, gpu.active); } });
+    scene.postRender.addEventListener(() => {
+      if (gpu.active) { gl.endQuery(tq.TIME_ELAPSED_EXT); gpu.pending.push(gpu.active); gpu.active = null; }
+      if (tq) gpuPoll();
+      const n = performance.now(); PROF.add("render", PROF.tr); PROF.frames++; if (PROF.picks) PROF.pickFrames++; PROF.picks = 0;
       if (PROF.last) PROF.acc.frame = (PROF.acc.frame || 0) + n - PROF.last; PROF.last = n;
       if (n - PROF.shown > 1000 && PROF.frames) { const f = PROF.frames, a = PROF.acc;
         PROF.report = { fps: +(f * 1000 / (n - PROF.shown)).toFixed(1), pickFrames: +(PROF.pickFrames / f).toFixed(2) };
         for (const k in a) PROF.report[k] = +(a[k] / f).toFixed(2);
+        PROF.report.gpu = gpu.n ? +(gpu.ms / gpu.n).toFixed(2) : "n/a"; gpu.ms = 0; gpu.n = 0;
         PROF.el.textContent = Object.entries(PROF.report).map(([k, v]) => k + " " + v).join("\n");
         PROF.acc = {}; PROF.frames = 0; PROF.pickFrames = 0; PROF.shown = n; } });
   }
