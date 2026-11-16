@@ -141,11 +141,13 @@
     const base = kind === "pullup" ? "models/gundam_rx78_pullup_18m" : "models/gundam_rx78_18m";
     return base + ({ low: "_low", medium: "_med", high: "" }[settings.modelDetail] || "") + ".glb";
   }
+  // anti-aliasing: one method per quality (they used to run together on Medium and High). Medium: FXAA, a cheap
+  // full-screen pass. High: 4x MSAA, sharper edges but more memory and fill work.
   const QUALITY = {
-    low:    { sse: 32, browserRes: true,  fxaa: false, shadows: false, cacheBytes: 256 * 1024 * 1024 },
-    medium: { sse: 16, browserRes: true,  fxaa: true,  shadows: false, cacheBytes: 512 * 1024 * 1024 },
-    high:   { sse: 8,  browserRes: false, fxaa: true,  shadows: true,  cacheBytes: 1024 * 1024 * 1024 }
-  }[settings.quality] || { sse: 16, browserRes: true, fxaa: true, shadows: false, cacheBytes: 512 * 1024 * 1024 };
+    low:    { sse: 32, browserRes: true,  fxaa: false, msaa: false, shadows: false, cacheBytes: 256 * 1024 * 1024 },
+    medium: { sse: 16, browserRes: true,  fxaa: true,  msaa: false, shadows: false, cacheBytes: 512 * 1024 * 1024 },
+    high:   { sse: 8,  browserRes: false, fxaa: false, msaa: true,  shadows: true,  cacheBytes: 1024 * 1024 * 1024 }
+  }[settings.quality] || { sse: 16, browserRes: true, fxaa: true, msaa: false, shadows: false, cacheBytes: 512 * 1024 * 1024 };
 
   // ---- viewer ---------------------------------------------------------------
   function makeViewer(extra) {
@@ -155,7 +157,7 @@
       selectionIndicator: false, vrButton: false, projectionPicker: false,
       terrainProvider: new C.EllipsoidTerrainProvider(),
       useBrowserRecommendedResolution: QUALITY.browserRes,
-      msaaSamples: QUALITY.fxaa ? 4 : 1,
+      msaaSamples: QUALITY.msaa ? 4 : 1,
       shadows: QUALITY.shadows
     }, extra || {}));
   }
@@ -471,7 +473,9 @@ void main() {
         dynamicScreenSpaceError: true,
         enablePick: true,   // keep a CPU copy of the geometry for the CPU height/ray queries (else each one reads it back from the GPU)
         imageBasedLighting: skyLight(),
-        shadows: QUALITY.shadows ? C.ShadowMode.ENABLED : C.ShadowMode.DISABLED
+        // High: the city receives shadows (the Gundam's and the dragon's fall on roofs and walls) but doesn't cast them, so it
+        // isn't drawn a second time into the shadow map every frame. Buildings no longer shadow each other or the street.
+        shadows: QUALITY.shadows ? C.ShadowMode.RECEIVE_ONLY : C.ShadowMode.DISABLED
       }); }
     catch (e) { if (!s.original) throw e; console.warn("PLATEAU original tileset failed for " + s.name + ", using the bundled copy", e); s.failed = 3; return openWard(s); }
     finally { if (blob) URL.revokeObjectURL(blob); }
