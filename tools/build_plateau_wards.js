@@ -3,6 +3,7 @@
  *
  *   cd tools && npm install && cd ..
  *   node --use-system-ca tools/build_plateau_wards.js [--target-mb 950] [--tex 512] [--wards shinjuku,chuo] [--cache DIR]
+ *   node --use-system-ca tools/build_plateau_wards.js --measure [--wards ...]   (all 23 wards: sizes only, builds nothing)
  *
  * For each ward it:
  *   1. asks the PLATEAU VIEW data catalog where the ward's tiles are and downloads the whole ward (tileset.json and every
@@ -21,6 +22,10 @@
 const fs = require("fs"), path = require("path");
 
 const WARDS = { shinjuku: 13104, shibuya: 13113, minato: 13103, chiyoda: 13101, sumida: 13107, koto: 13108, chuo: 13102, taito: 13106 };
+// all 23 special wards of Tokyo, for --measure
+const ALL_WARDS = { chiyoda: 13101, chuo: 13102, minato: 13103, shinjuku: 13104, bunkyo: 13105, taito: 13106, sumida: 13107,
+  koto: 13108, shinagawa: 13109, meguro: 13110, ota: 13111, setagaya: 13112, shibuya: 13113, nakano: 13114, suginami: 13115,
+  toshima: 13116, kita: 13117, arakawa: 13118, itabashi: 13119, nerima: 13120, adachi: 13121, katsushika: 13122, edogawa: 13123 };
 const TEX_CANDIDATES = [1024, 768, 512, 384, 256];
 const GEOID_OFFSET = 36.71;          // Tokyo: ellipsoid height of mean sea level (m), as in ground.json
 const CELL_M = 20;
@@ -31,7 +36,8 @@ const OUT = path.join(ROOT, "cities", "tokyo");
 const CACHE = path.resolve(arg("cache", path.join(ROOT, "..", "plateau-cache")));
 const TARGET_MB = +arg("target-mb", 950);
 const FIXED_TEX = arg("tex") ? +arg("tex") : null;
-const ONLY = arg("wards") ? arg("wards").split(",") : Object.keys(WARDS);
+const MEASURE = args.includes("--measure");
+const ONLY = arg("wards") ? arg("wards").split(",") : Object.keys(MEASURE ? ALL_WARDS : WARDS);
 
 let sharp, draco, dracoEnc;
 try { sharp = require("sharp"); } catch (e) { console.error("Run `npm install` in tools/ first (needs sharp and draco3dgltf)."); process.exit(1); }
@@ -332,6 +338,68 @@ function buildGround(wards) {
   return { area: { name: "tokyo", west: deg(w), south: deg(s), east: deg(e), north: deg(n), size, file: "ground/tokyo.bin" }, data };
 }
 
+// ---------------------------------------------------------------- measure ---------------------------------------------------
+// --measure: builds nothing. Reads the size of every original tile from the server's headers (exact), then converts a random
+// sample of tiles per ward (about 5%, at least 12) at each texture size and scales it to the whole ward (an estimate).
+async function catalogTileset(code) {
+  let lastErr;
+  for (const id of [`${code}-bldg-lod2-texture-2025`, `${code}-bldg-lod2-texture-2024`, `${code}-bldg-lod2-texture-2023`]) {
+    try {
+      const r = await fetch(`https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/${id}/tileset.json`); if (!r.ok) throw new Error(r.status + " " + id);
+      const cat = await r.json();
+      const src = cat.root && cat.root.children && cat.root.children[0] && cat.root.children[0].content && cat.root.children[0].content.uri;
+      if (/^https:\/\/.*tileset\.json$/.test(src || "")) return { id, src };
+      lastErr = new Error("catalog: no tileset in " + id);
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+async function allTileUrls(src, out = []) {   // follows nested tilesets
+  const ts = await fetchRetry(src, "json"), base = src.replace(/[^/]*$/, "");
+  for (const u of contentUris(ts.root)) { const abs = new URL(u, base).href; if (/\.json$/.test(u)) await allTileUrls(abs, out); else out.push({ u, abs }); }
+  return out;
+}
+async function headSize(url) {
+  for (let i = 0; ; i++) {
+    try { const r = await fetch(url, { method: "HEAD" }); if (!r.ok) throw new Error(r.status + " " + url);
+      const n = +r.headers.get("content-length"); if (n > 0) return n;
+      const g = await fetch(url, { headers: { Range: "bytes=0-0" } }); const cr = g.headers.get("content-range"); await g.arrayBuffer();
+      if (cr && /\/(\d+)$/.test(cr)) return +cr.match(/\/(\d+)$/)[1];
+      throw new Error("no size for " + url);
+    } catch (e) { if (i >= 4) throw e; await new Promise((r) => setTimeout(r, 1000 * 2 ** i)); }
+  }
+}
+async function measure() {
+  const rows = [], other = dirBytes(ROOT, (p) => /[\\/](\.git|node_modules|cities)$/.test(p));
+  const mb = (b) => (b / 1e6).toFixed(1).padStart(8);
+  for (const name of ONLY) {
+    const code = ALL_WARDS[name]; if (!code) throw new Error("unknown ward " + name);
+    let cat; try { cat = await catalogTileset(code); } catch (e) { console.log(`${name}: no textured LOD2 tileset found (${e.message})`); rows.push({ name, missing: true }); continue; }
+    const tiles = await allTileUrls(cat.src), sizes = new Array(tiles.length);
+    await pool(tiles, 16, async (t, k) => { sizes[k] = await headSize(t.abs); });
+    const bytes = sizes.reduce((a, b) => a + b, 0);
+    const rnd = seeded(7 + code), idx = tiles.map((_, k) => k).filter(() => rnd() < 0.05);
+    for (let k = 0; idx.length < Math.min(12, tiles.length); k++) if (!idx.includes(k)) idx.push(k);
+    const dir = path.join(CACHE, name); let inB = 0; const out = Object.fromEntries(TEX_CANDIDATES.map((c) => [c, 0]));
+    await pool(idx, 8, async (k) => {
+      const f = path.join(dir, tiles[k].u); let buf;
+      if (fs.existsSync(f) && fs.statSync(f).size === sizes[k]) buf = fs.readFileSync(f);
+      else { buf = await fetchRetry(tiles[k].abs); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, buf); }
+      inB += buf.length;
+      for (const c of TEX_CANDIDATES) { let o; try { o = (await shrinkTile(buf, c)).length; } catch (e) { o = buf.length; stats.measureFailed = (stats.measureFailed || 0) + 1; } out[c] += o; }
+    });
+    const est = Object.fromEntries(TEX_CANDIDATES.map((c) => [c, bytes * out[c] / inB]));
+    rows.push({ name, dataset: cat.id, tiles: tiles.length, sample: idx.length, bytes, est });
+    console.log(`${name.padEnd(11)} ${String(tiles.length).padStart(5)} tiles  original ${mb(bytes)} MB  ` + TEX_CANDIDATES.map((c) => `${c}px ${mb(est[c])}`).join("  ") + `  (${cat.id}, sample ${idx.length})`);
+  }
+  const ok = rows.filter((r) => !r.missing), sum = (f) => ok.reduce((a, r) => a + f(r), 0);
+  console.log(`\nTOTAL ${ok.length} wards, ${sum((r) => r.tiles)} tiles, original ${(sum((r) => r.bytes) / 1e9).toFixed(2)} GB (exact, from headers)`);
+  for (const c of TEX_CANDIDATES) console.log(`  ${c} px: map ≈ ${(sum((r) => r.est[c]) / 1e6).toFixed(0)} MB (rest of the site ${(other / 1e6).toFixed(0)} MB)`);
+  if (stats.measureFailed) console.log(`${stats.measureFailed} sample conversions failed and were counted at their original size.`);
+  fs.writeFileSync(path.join(CACHE, "measure.json"), JSON.stringify({ other, rows }, null, 1));
+  console.log("Saved " + path.join(CACHE, "measure.json"));
+}
+
 // ---------------------------------------------------------------- main ------------------------------------------------------
 function dirBytes(d, skip) { let t = 0; for (const f of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, f.name); if (skip(p)) continue; t += f.isDirectory() ? dirBytes(p, skip) : fs.statSync(p).size; } return t; }
 function seeded(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296); }
@@ -341,6 +409,7 @@ function seeded(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 
   dracoEnc = await require("draco3dgltf").createEncoderModule({});
   fs.mkdirSync(CACHE, { recursive: true });
   console.log("Cache: " + CACHE);
+  if (MEASURE) return measure();
   const wards = [];
   for (const name of ONLY) { if (!WARDS[name]) throw new Error("unknown ward " + name); wards.push(await downloadWard(name)); }
 
