@@ -2,8 +2,8 @@
 // PLATEAU's original tiles (High graphics) come from another site, so they are never cached here.
 // The bundled offline city (cities/: PLATEAU Tokyo + OSM Nangang) is not precached because it is large;
 // each file is cached the first time it is used, so areas you have visited also work offline.
-const CACHE = "gfs-v80";
-const CITY_CACHE = "gfs-cities-v1"; // kept across app updates; bump only when the city data changes
+const CACHE = "gfs-v81";
+const CITY_CACHE = "gfs-cities-v2"; // kept across app updates; bump only when the city data changes
 const SHELL = ["./", "index.html", "css/style.css", "js/app.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "models/gundam_rx78_18m.glb", "models/gundam_rx78_pullup_18m.glb",
   "models/gundam_rx78_18m_med.glb", "models/gundam_rx78_18m_low.glb", "models/gundam_rx78_pullup_18m_med.glb", "models/gundam_rx78_pullup_18m_low.glb",

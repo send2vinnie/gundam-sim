@@ -353,7 +353,9 @@ void main() {
   // ---- local (offline) city -------------------------------------------------
   // PLATEAU tiles use ellipsoidal heights. The ground under them is a terrain built from each building's base height
   // (cities/tokyo/ground.json + .bin grids), so streets, roofs and landing all line up. Elsewhere the ground is the ellipsoid.
-  const LOCAL_WARDS = ["shinjuku", "shibuya", "minato", "chiyoda", "sumida", "koto"];
+  // whole wards (tools/build_plateau_wards.js), so the city is one connected map; Chuo and Taito fill the gap between
+  // Tokyo Station and Skytree
+  const LOCAL_WARDS = ["shinjuku", "shibuya", "minato", "chiyoda", "chuo", "taito", "sumida", "koto"];
   const LOCAL_CREDITS = {
     plateau: "3D都市モデル Project PLATEAU（国土交通省）を加工して作成",
     plateauOriginal: "出典：国土交通省 PLATEAU 3D都市モデル（東京都 2025 LOD2）",
@@ -409,7 +411,8 @@ void main() {
     // Tokyo areas stream in when the camera comes near them and are dropped (memory freed) when it leaves, so the start
     // screen in Taipei loads no Tokyo tiles at all and a flight keeps only the area(s) around it.
     await Promise.all(LOCAL_WARDS.map(async (w) => {
-      const j = await (await fetch("cities/tokyo/" + w + "/tileset.json")).json();
+      let j; try { const r = await fetch("cities/tokyo/" + w + "/tileset.json"); if (!r.ok) throw new Error(r.status); j = await r.json(); }
+      catch (e) { console.warn("no local map for " + w, e); return; }   // a ward not built (yet) is simply left out
       const [west, south, east, north] = j.root.boundingVolume.region;
       wardSlots.push({ name: w, west, south, east, north, ts: null, loading: null, want: false, json: HIGH_GFX ? j : null, original: false, failed: 0 });
     }));
@@ -426,11 +429,11 @@ void main() {
     return Math.hypot(dx * R_EARTH * Math.cos(lat), dy * R_EARTH);
   }
   // High: PLATEAU's original full-detail tiles, streamed from PLATEAU's public 3D Tiles hosting (the PLATEAU VIEW data
-  // catalog, CORS open). The bundled copies are the same tile tree, clipped to the play areas with textures reduced to
-  // 1024 px, so the bundled tileset.json is reused with each tile pointing at its original: the same areas, levels of
+  // catalog, CORS open). The bundled copies are the same tile tree (whole wards, geometry re-encoded, textures reduced),
+  // so the bundled tileset.json is reused with each tile pointing at its original: the same areas, levels of
   // detail and feature ids, only sharper textures. The official catalog API gives the current location of each ward's
   // tiles. If it can't be reached, or tiles keep failing, that area falls back to the bundled copy.
-  const PLATEAU_CODES = { shinjuku: 13104, shibuya: 13113, minato: 13103, chiyoda: 13101, sumida: 13107, koto: 13108 };
+  const PLATEAU_CODES = { shinjuku: 13104, shibuya: 13113, minato: 13103, chiyoda: 13101, chuo: 13102, taito: 13106, sumida: 13107, koto: 13108 };
   async function originalWardUrl(s) {
     const r = await fetch("https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/" + PLATEAU_CODES[s.name] + "-bldg-lod2-texture-2025/tileset.json");
     if (!r.ok) throw new Error("PLATEAU catalog " + r.status);

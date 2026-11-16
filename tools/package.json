@@ -1,0 +1,9 @@
+{
+  "name": "gundam-sim-tools",
+  "private": true,
+  "description": "Build tools for the simulator's data (tools/build_plateau_wards.js needs sharp and draco3dgltf).",
+  "dependencies": {
+    "draco3dgltf": "1.5.9",
+    "sharp": "0.35.5"
+  }
+}

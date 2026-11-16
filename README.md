@@ -8,10 +8,17 @@ is needed. It runs in Chrome or Edge on **Windows** and Chrome on **Android**, a
 The game uses only its own local city maps, stored with the game and cached on the device as you visit areas, so they also
 work offline afterwards:
 * Tokyo: the Japanese government's open 3D city model [Project PLATEAU](https://www.mlit.go.jp/plateau/) (MLIT, 2025, LOD2
-  buildings with photo textures where PLATEAU has them). About 1.5 km around each starting point: Nishi-Shinjuku, Shibuya,
-  Tokyo Tower, Tokyo Station / Marunouchi, Skytree and Odaiba (`cities/tokyo/<ward>/tileset.json`, 653 MB in total).
-  Tiles were clipped to those areas, the building attribute tables were removed and texture atlases were reduced to
-  1024 px. The ground under the buildings is built from each building's surveyed base height (`cities/tokyo/ground/`).
+  buildings with photo textures where PLATEAU has them). One connected map of eight whole wards: Shinjuku, Shibuya,
+  Minato, Chiyoda, Chuo, Taito, Sumida and Koto (`cities/tokyo/<ward>/tileset.json`), so you can fly between all six
+  starting points (Nishi-Shinjuku, Shibuya, Tokyo Tower, Tokyo Station / Marunouchi, Skytree, Odaiba) over real city.
+  The map is built by `tools/build_plateau_wards.js` (run on a computer that can reach PLATEAU, see *Rebuilding the map*):
+  * **Geometry re-encoded.** PLATEAU's tiles store every triangle with its own three full-precision corners. The tool
+    re-encodes them with shared corners and quantized values (positions to about 1 cm), which makes the geometry about
+    9 times smaller with no visible change; the tile tree, levels of detail, file names and building ids stay PLATEAU's.
+  * **Textures reduced** (4096 px originals) to the largest size that keeps the whole site under GitHub Pages' 1 GB limit,
+    at most 1024 px. The building attribute tables are removed.
+  * **Ground:** one height grid for the whole map (`cities/tokyo/ground/tokyo.bin`, 20 m cells) from each building's
+    surveyed base height, filled in between for streets, parks, rivers and the bay.
 * Nangang start screen: OpenStreetMap building footprints within 1 km of the Exhibition Center, extruded from their
   `height` / `building:levels` (+ `roof:levels`) tags, with `min_height` bases and multipolygon holes
   (`cities/taipei/nangang-osm-v2.geojson`, rebuilt with `node --use-system-ca tools/build_nangang_osm.js [radius_m]`).
@@ -30,6 +37,16 @@ own HTTP cache keeps them, for an hour). If the catalog can't be reached, or an 
 falls back to the bundled copy. The data is used under the PLATEAU site policy (PDL 1.0, compatible with CC BY 4.0), with
 the source credit on screen and in Credits. Low and Medium always use the bundled copies exactly as stored; High never
 reduces the textures.
+
+**Rebuilding the map.** On a computer that can reach PLATEAU (about 5 GB of free disk for the download cache):
+```
+cd tools && npm install && cd ..
+node --use-system-ca tools/build_plateau_wards.js            # all eight wards, texture size chosen to fit 950 MB
+node --use-system-ca tools/build_plateau_wards.js --tex 512  # or a fixed texture size
+```
+It downloads each ward once into `../plateau-cache` (reused on later runs), prints the estimated site size for each
+texture size, writes `cities/tokyo/`, and removes map folders that are no longer used. After a rebuild, bump
+`CITY_CACHE` in `sw.js` so installed apps fetch the new map.
 
 The start-screen location and the Tokyo starting points are `LOBBY` and `SPAWNS` near the top of `js/app.js`.
 `config.js` is no longer used.
@@ -170,7 +187,7 @@ On every quality setting:
   query; shader changes show up here, not in the CPU times; "n/a" where the browser doesn't offer the timer), the time per frame (ms) of each part of the update
   (area streaming, flight: ground and walls / physics / pose / HUD, weapons and effects, camera, start screen), Cesium's
   render, the frame time, the FPS, the time in GPU picks and the share of frames that pick.
-* **Tokyo areas stream by distance.** Each of the 6 Tokyo areas is opened when the camera comes within the draw distance
+* **Tokyo wards stream by distance.** Each of the 8 Tokyo wards is opened when the camera comes within the draw distance
   + 1 km of it (Low 4 km, others 7 km) and dropped, freeing its memory, 1.5 km beyond that. The Taipei start screen loads no
   Tokyo tiles at all.
 * **Automatic resolution** (Settings, on by default). Every 2 s the game checks the frame rate: below 85 % of the target
