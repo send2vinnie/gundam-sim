@@ -129,7 +129,9 @@ about 0.15 s, stays in until the way has been clear for half a second, then ease
 brings the camera closer instead of tilting the view.
 
 ## Graphics quality: High
-High (desktop GPUs) streams PLATEAU's original tiles (see *City maps*), with anti-aliasing, shadows and full resolution.
+High (desktop GPUs) streams PLATEAU's original tiles (see *City maps*), with 4x MSAA anti-aliasing, shadows and full resolution.
+The characters cast shadows onto the city, but the buildings don't cast shadows themselves: otherwise the whole city would be
+drawn a second time into the shadow map every frame. Medium uses FXAA only (it used to run 4x MSAA and FXAA together).
 The original textures are 16 times the memory of the bundled ones (a detailed tile holds about 64 MB of texture instead of
 4 MB), so each area gets a 1.5 GB tile budget (512 MB on Medium). When a view needs more, Cesium draws coarser tiles until
 it fits, so up close the buildings are sharper than on Medium, but further away High can show coarser tiles.
